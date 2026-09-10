@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {holes,internal,boardEdges,placement,footprint,validPlacement,occupied} from './dist/breadboard.mjs';
-import {connected,checkCircuit,lessonWires} from './dist/circuit.mjs';
+import {connected,checkCircuit,lessonWires,definitions} from './dist/circuit.mjs';
+import {holeMap} from './dist/breadboard.mjs';
 assert.equal(holes.length,400);assert.equal(new Set(holes.map(h=>h.id)).size,400);
 assert.ok(connected(internal,'bb:a1','bb:e1'));
 assert.ok(!connected(internal,'bb:a1','bb:a2'));
@@ -17,4 +18,8 @@ assert.ok(checkCircuit([...edges,...wire],parts.map(p=>p.id)).ready);
 assert.ok(!checkCircuit([...edges,...wire.slice(1)],parts.map(p=>p.id)).ready);
 assert.ok(!checkCircuit([...boardEdges(parts.map(p=>p.id==='oled'?placement('oled',13):p)),...wire],parts.map(p=>p.id)).ready);
 assert.equal(checkCircuit(edges,parts.map(p=>p.id)).errors.length,0);
+for(const id of ['esp','oled','amp']){const p=placement(id),d=definitions.find(d=>d.id===id);for(const e of footprint(id)){const pin=d.pins.find(v=>v[0]===e.a.split(':')[1]),h=holeMap.get(e.b),x=p.pos[0]+pin[1]*Math.cos(p.rotation)-pin[2]*Math.sin(p.rotation),y=p.pos[1]+pin[1]*Math.sin(p.rotation)+pin[2]*Math.cos(p.rotation);assert.ok(Math.hypot(x-h.x,y-h.y)<.001,`${e.a} must align exactly with ${e.b}`);}}
+assert.ok(connected(edges,'speaker:+','amp:+'));assert.ok(connected(edges,'speaker:-','amp:-'));
+assert.ok(!connected(edges,'speaker:+','bb:a30'));assert.equal(footprint('speaker').length,0);
+console.log('PASS: exact header-to-hole alignment and direct speaker screw-terminal wiring');
 console.log('PASS: 400 holes, strip isolation, rail isolation, five footprints, overlap, bounds, OLED circuit and movement');
