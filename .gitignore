@@ -1,0 +1,4 @@
+package/
+*.tgz
+*.log
+node_modules/
