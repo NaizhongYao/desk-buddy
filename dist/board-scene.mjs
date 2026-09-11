@@ -1,5 +1,5 @@
 import * as T from "three";
-import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { GLTFLoader } from "./vendor/GLTFLoader.js?v=20260912-1";
 import { definitions } from "./circuit.mjs";
 import {
   holes,

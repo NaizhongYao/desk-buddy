@@ -1,6 +1,6 @@
 import * as T from "three";
 import { definitions } from "./circuit.mjs";
-import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { GLTFLoader } from "./vendor/GLTFLoader.js?v=20260912-1";
 
 const SKIP_KEY = "desk-buddy-skip-intro";
 const $ = (id) => document.getElementById(id);
