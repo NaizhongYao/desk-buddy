@@ -1,52 +1,689 @@
-import * as T from 'three';
-import {GLTFLoader} from './vendor/GLTFLoader.js';
-import {OrbitControls} from './vendor/OrbitControls.js';
-import {definitions} from './circuit.mjs';
-import {holes,holeMap,footprint,placement,defaults,validPlacement,occupied} from './breadboard.mjs';
-export async function createTable(container,screenCanvas,callbacks){
- const scene=new T.Scene();scene.background=new T.Color('#eaf0f3');
- const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));container.prepend(renderer.domElement);
- const camera=new T.OrthographicCamera(-60,60,55,-55,.1,1000);camera.position.set(0,0,200);
- const controls=new OrbitControls(camera,renderer.domElement);controls.enableRotate=false;controls.enableDamping=true;controls.minZoom=.5;controls.maxZoom=5;controls.mouseButtons={LEFT:null,MIDDLE:T.MOUSE.PAN,RIGHT:T.MOUSE.ROTATE};
- scene.add(new T.HemisphereLight(0xffffff,0x768594,3));const light=new T.DirectionalLight(0xffffff,4);light.position.set(-30,50,100);scene.add(light);
- function box(x,y,z,w,h,d,color,parent=scene){const m=new T.Mesh(new T.BoxGeometry(w,h,d),new T.MeshStandardMaterial({color,roughness:.8}));m.position.set(x,y,z);parent.add(m);return m;}
- const body=box(0,0,-4,55,85,8,0xfafaf5);box(0,0,.02,2.8,80,.1,0xc5cfce);
- const speakerSupport=box(44,-32,-3,40,33,3,0xc8d5dc);speakerSupport.visible=false;
- const traces=new T.Group();scene.add(traces);traces.visible=false;
- for(const net of new Set(holes.map(h=>h.net))){const hs=holes.filter(h=>h.net===net),a=hs[0],b=hs.at(-1);box((a.x+b.x)/2,(a.y+b.y)/2,.08,Math.abs(a.x-b.x)+1.4,Math.abs(a.y-b.y)+1.4,.12,net.includes('+')?0xea665a:net.includes('-')?0x408dd6:0xd2a447,traces);}
- const hitHoles=[];
- for(const h of holes){const m=box(h.x,h.y,.2,1,1,.2,0x405059);m.userData.hole=h.id;hitHoles.push(m);}
- const labels=container.querySelector('#labels');
- function label(text,x,y){const el=document.createElement('span');el.className='boardlabel';el.textContent=text;labels.append(el);return{el,v:new T.Vector3(x,y,1)};}
- const boardLabels=[...Array.from({length:30},(_,i)=>label(String(i+1),-1.3,(14.5-i)*2.54)),...holes.filter(h=>/^bb:[a-j]1$/.test(h.id)).map(h=>label(h.id[3],h.x,40)),label('+',-20.46,40),label('−',-23,40),label('+',20.46,40),label('−',23,40)];
- for(const x of [-20.46,20.46])box(x-1.1,0,.1,.25,75,.1,0xe75b50);for(const x of [-23,23])box(x-1.1,0,.1,.25,75,.1,0x3885c9);
- const roots=new Map(),parts=new Map(),titles=new Map(),loader=new GLTFLoader();let wires=[],wireObjects=[],mountObjects=[],selected=null,pending=null,highlighted=[],xray=false,mode='top',drag=null;
- const texture=new T.CanvasTexture(screenCanvas);texture.magFilter=T.NearestFilter;texture.minFilter=T.NearestFilter;
- await Promise.all(definitions.map(async d=>{const data=await loader.loadAsync(`./assets/part${d.model}.glb`),model=data.scene,g=new T.Group();const b=new T.Box3().setFromObject(model),width=d.id==='speaker'?43:d.id==='mic'?15:d.id==='amp'?19:d.id==='esp'?18:27;// GLB coordinates are already millimetres; preserve the 2.54 mm pitch.
-model.traverse(o=>{if(o.isMesh){if(/^(Square[ _]pin|Header[ _]insulator|Red[ _]speaker[ _]wire|Black[ _]speaker[ _]wire)/i.test(o.name))o.visible=false;o.userData.part=d.id;o.material=o.material.clone();}});g.add(model);g.visible=false;scene.add(g);roots.set(d.id,g);titles.set(d.id,label(d.name,0,0));if(d.id==='oled'){const s=new T.Mesh(new T.PlaneGeometry(23,11.5),new T.MeshBasicMaterial({map:texture,side:T.DoubleSide}));s.position.set(0,-.1,1.43);g.add(s);}}));
- function clear(list){for(const m of list){scene.remove(m);m.geometry.dispose();m.material.dispose();}list.length=0;}
- function cable(a,b,color,list,arch=8){const curve=new T.CubicBezierCurve3(a,a.clone().add(new T.Vector3(0,0,arch)),b.clone().add(new T.Vector3(0,0,arch)),b);const mesh=new T.Mesh(new T.TubeGeometry(curve,20,.28,6,false),new T.MeshStandardMaterial({color}));scene.add(mesh);list.push(mesh);}
- function state(){return [...parts.values()].map(p=>({...p,pos:[...p.pos]}));}
- function rebuild(){clear(wireObjects);clear(mountObjects);for(const w of wires){const a=holeMap.get(w.a),b=holeMap.get(w.b);if(!a||!b)continue;cable(new T.Vector3(a.x,a.y,2),new T.Vector3(b.x,b.y,2),w.color??0x1595aa,wireObjects);for(const h of [a,b]){const plug=box(h.x,h.y,1.1,.9,.9,2,0x27343c);wireObjects.push(plug);}}
- for(const p of parts.values()){const d=definitions.find(d=>d.id===p.id),g=roots.get(p.id);g.updateMatrixWorld(true);for(const e of footprint(p.id,p.row)){const h=holeMap.get(e.b),pin=d.pins.find(v=>v[0]===e.a.split(':')[1]);if(!h||!pin)continue;
- // Square male pins extend below the breadboard surface, with a flush spacer.
- mountObjects.push(box(h.x,h.y,-.2,.64,.64,7.2,0xc8a24a));mountObjects.push(box(h.x,h.y,1.65,2.1,2.1,2.5,0x222c31));
- if(p.id==='mic'){const a=g.localToWorld(new T.Vector3(pin[1],pin[2],-.5));cable(a,new T.Vector3(h.x,h.y,2.9),0xc8a24a,mountObjects,0);}
- }}
- if(parts.has('amp')&&parts.has('speaker')){const amp=roots.get('amp'),speaker=roots.get('speaker');amp.updateMatrixWorld(true);speaker.updateMatrixWorld(true);for(const sign of [-1,1]){const start=speaker.localToWorld(new T.Vector3(sign===1?-2.4:2.4,-7.3,-3.2));const entry=amp.localToWorld(new T.Vector3(sign*2.05,11.4,2.8));const clamp=amp.localToWorld(new T.Vector3(sign*2.05,9.0,2.8));cable(start,entry,sign===1?0xdd3934:0x242a30,mountObjects,9);cable(entry,clamp,0xcd9a62,mountObjects,0);}}
+import * as T from "three";
+import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { definitions } from "./circuit.mjs";
+import {
+  holes,
+  holeMap,
+  footprint,
+  placement,
+  speakerPlacement,
+  defaults,
+  validPlacement,
+  occupied,
+  coveredHoles,
+} from "./breadboard.mjs";
 
- }
- function install(p){parts.set(p.id,p);const g=roots.get(p.id);g.visible=true;g.position.set(...p.pos,3.4);g.rotation.set(0,0,p.rotation);speakerSupport.visible=parts.has('speaker');}
- function setActive(id,on){if(!on){parts.delete(id);roots.get(id).visible=false;speakerSupport.visible=parts.has('speaker');rebuild();return true;}if(parts.has(id))return true;let row=defaults[id];if(!validPlacement(state(),id,row,wires)){row=Array.from({length:30},(_,i)=>i+1).find(r=>validPlacement(state(),id,r,wires));if(!row){callbacks.message?.('面包板没有足够的连续空位，请先收回其他零件。');return false;}}install(placement(id,row));rebuild();return true;}
- const pointer=new T.Vector2(),ray=new T.Raycaster(),plane=new T.Plane(new T.Vector3(0,0,1),0);
- function point(e){const r=renderer.domElement.getBoundingClientRect();pointer.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(pointer,camera);const p=new T.Vector3();ray.ray.intersectPlane(plane,p);return p;}
- function nearest(p){let best=null,dist=1.6;for(const h of holes){const d=Math.hypot(h.x-p.x,h.y-p.y);if(d<dist){best=h;dist=d;}}return best;}
- const info=document.createElement('div');info.className='holeinfo';container.append(info);info.textContent='400 孔 · 滚轮放大 · 选孔接线';
- renderer.domElement.addEventListener('pointerdown',e=>{if(e.button!==0)return;const p=point(e);const hit=ray.intersectObjects([...roots.values()].filter(g=>g.visible),true).find(v=>v.object.visible&&v.object.userData.part);if(!hit&&mode==='top'){const h=nearest(p);if(h){selected=null;callbacks.select(null);callbacks.pin(h.id);return;}}if(hit){selected=hit.object.userData.part;callbacks.select(selected);drag={id:selected,y:p.y,old:parts.get(selected)};controls.enabled=false;renderer.domElement.setPointerCapture(e.pointerId);}});
- renderer.domElement.addEventListener('pointermove',e=>{const p=point(e),h=nearest(p);if(h){const owner=[...parts.values()].flatMap(p=>footprint(p.id,p.row)).find(v=>v.b===h.id);info.textContent=h.id.slice(3)+(owner?' · '+owner.a:' · '+(occupied(state(),wires).has(h.id)?'已插线':'空孔'))+' · '+(h.net.includes('+')||h.net.includes('-')?'同侧同色轨相通':'同一行 '+(h.net[0]==='L'?'a–e':'f–j')+' 相通');}if(drag&&drag.id!=='speaker'){const row=drag.old.row+Math.round((drag.y-p.y)/2.54);if(validPlacement(state(),drag.id,row,wires)){install(placement(drag.id,row));rebuild();}}});
- function release(){if(drag){drag=null;controls.enabled=true;callbacks.change();}}renderer.domElement.addEventListener('pointerup',release);renderer.domElement.addEventListener('pointercancel',release);
- function resize(){const w=container.clientWidth,h=container.clientHeight;renderer.setSize(w,h,false);const span=Math.max(100,140/(w/h));camera.left=-span*w/h/2;camera.right=span*w/h/2;camera.top=span/2;camera.bottom=-span/2;camera.updateProjectionMatrix();}new ResizeObserver(resize).observe(container);resize();
- function placeLabel(l,v){const p=v.clone().project(camera);l.el.style.left=(p.x+1)/2*container.clientWidth+'px';l.el.style.top=(1-p.y)/2*container.clientHeight+'px';}
- function render(){requestAnimationFrame(render);controls.update();for(const l of boardLabels)placeLabel(l,l.v);for(const [id,l]of titles){l.el.style.display=parts.has(id)?'':'none';if(parts.has(id)){const p=parts.get(id);placeLabel(l,new T.Vector3(p.pos[0]+(id==='esp'?-24:id==='amp'?-8:12),p.pos[1],5));}}const used=occupied(state(),wires),selectedPins=new Set(selected&&parts.has(selected)?footprint(selected,parts.get(selected).row).map(e=>e.b):[]),nets=new Set([...selectedPins].map(id=>holeMap.get(id)?.net)),lit=new Set(selectedPins.size?holes.filter(h=>nets.has(h.net)).map(h=>h.id):highlighted);for(let i=0;i<holes.length;i++){const id=holes[i].id,m=hitHoles[i];m.material.color.set(selectedPins.has(id)?0xffce44:lit.has(id)?0x00d3a8:used.has(id)?0xf29945:0x405059);m.material.depthTest=!lit.has(id);m.renderOrder=lit.has(id)?100:0;m.scale.setScalar(lit.has(id)?1.4:1);}renderer.render(scene,camera);}render();
- return{roots,state,setActive,refreshScreen(){texture.needsUpdate=true;},setWires(v){wires=v;rebuild();},highlight(ids,from){highlighted=ids;pending=from;},select(id){selected=id;callbacks.select(id);},setMode(v){mode=v;controls.enableRotate=v==='three';camera.position.set(v==='three'?60:0,v==='three'?-80:0,v==='three'?110:200);controls.target.set(0,0,0);},center(){camera.zoom=1;camera.updateProjectionMatrix();controls.target.set(0,0,0);},rotate(){callbacks.message?.('排针方向固定，以保证每根针脚插入独立孔组；拖动可更换行位。');},flip(){callbacks.message?.('插入面包板的零件不能翻面；可切换 3D 观察。');},restore(ps){parts.clear();speakerSupport.visible=false;for(const g of roots.values())g.visible=false;for(const p of ps){const row=p.row??defaults[p.id];if(!validPlacement(state(),p.id,row))throw Error('零件孔位冲突或超出面包板');install(placement(p.id,row));}rebuild();},setXray(on){xray=on;traces.visible=on;body.material.transparent=on;body.material.opacity=on?.28:1;for(const g of roots.values())g.traverse(o=>{if(o.isMesh){o.material.transparent=on;o.material.opacity=on?.22:1;o.material.depthWrite=!on;}});},led(on){const g=roots.get('esp');let b=g.getObjectByName('virtual-led');if(!b){b=box(4.1,1.25,1.6,1,1,.3,0x198eff,g);b.name='virtual-led';}b.visible=on;}};
+const BOARD_TOP = 0;
+const BOARD_THICK = 8;
+const BOARD_Z = BOARD_TOP - BOARD_THICK / 2;
+const DESK_Z = BOARD_TOP - BOARD_THICK - 0.4;
+const SEATED_Z = 2.8;
+const SPEAKER_Z = -3;
+const HIDE_ON_SPEAKER = /wire|dupont|contact window|socket opening/i;
+
+export async function createTable(container, screenCanvas, callbacks) {
+  const scene = new T.Scene();
+  scene.background = new T.Color("#e9eddf");
+  const renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputColorSpace = T.SRGBColorSpace;
+  container.prepend(renderer.domElement);
+
+  const camera = new T.OrthographicCamera(-60, 60, 55, -55, 0.1, 1200);
+  renderer.toneMapping = T.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+  const view = { panX: 0, panY: 0, zoom: 1, azimuth: 0, polar: 0.28, preset: "top" };
+  const TOP_VIEW = { polar: 0.28, azimuth: 0, zoom: 1 };
+  const THREE_VIEW = { polar: 1.02, azimuth: 0.72, zoom: 0.92 };
+  const camRight = new T.Vector3();
+  const camUp = new T.Vector3();
+
+  function applyCamera() {
+    const dist = 240;
+    view.polar = Math.min(1.28, Math.max(0.22, view.polar));
+    const p = view.polar;
+    const a = view.azimuth;
+    const tx = view.panX;
+    const ty = view.panY;
+    camera.up.set(0, 0, 1);
+    camera.position.set(tx + dist * Math.sin(p) * Math.sin(a), ty - dist * Math.sin(p) * Math.cos(a), dist * Math.cos(p));
+    camera.lookAt(tx, ty, 0);
+    camera.zoom = view.zoom;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    const el = renderer.domElement;
+    el.dataset.polar = p.toFixed(3);
+    el.dataset.azimuth = a.toFixed(3);
+    el.dataset.panx = tx.toFixed(2);
+    el.dataset.pany = ty.toFixed(2);
+    el.dataset.preset = view.preset;
+  }
+
+  function panByScreen(dx, dy) {
+    const el = renderer.domElement;
+    const w = Math.max(1, el.clientWidth);
+    const h = Math.max(1, el.clientHeight);
+    const worldX = (camera.right - camera.left) / camera.zoom / w;
+    const worldY = (camera.top - camera.bottom) / camera.zoom / h;
+    camRight.set(1, 0, 0).applyQuaternion(camera.quaternion).setZ(0);
+    camUp.set(0, 1, 0).applyQuaternion(camera.quaternion).setZ(0);
+    if (camRight.lengthSq() < 1e-6) camRight.set(1, 0, 0);
+    if (camUp.lengthSq() < 1e-6) camUp.set(0, 1, 0);
+    camRight.normalize();
+    camUp.normalize();
+    view.panX += camRight.x * dx * worldX + camUp.x * -dy * worldY;
+    view.panY += camRight.y * dx * worldX + camUp.y * -dy * worldY;
+  }
+
+  function resetView(preset = view.preset) {
+    const src = preset === "three" ? THREE_VIEW : TOP_VIEW;
+    view.preset = preset;
+    view.panX = 0;
+    view.panY = 0;
+    view.zoom = src.zoom;
+    view.azimuth = src.azimuth;
+    view.polar = src.polar;
+    applyCamera();
+  }
+
+  scene.add(new T.AmbientLight(0xf4f7f8, 0.55));
+  scene.add(new T.HemisphereLight(0xffffff, 0x7a8b96, 1.35));
+  const key = new T.DirectionalLight(0xfff7ee, 2.35);
+  key.position.set(-24, 48, 120);
+  scene.add(key);
+  const fill = new T.DirectionalLight(0xd7e8f6, 0.95);
+  fill.position.set(50, -28, 70);
+  scene.add(fill);
+  const rim = new T.DirectionalLight(0xeef6ff, 0.55);
+  rim.position.set(10, -80, 40);
+  scene.add(rim);
+
+  function box(x, y, z, w, h, d, color, parent = scene) {
+    const m = new T.Mesh(
+      new T.BoxGeometry(w, h, d),
+      new T.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0.04 }),
+    );
+    m.position.set(x, y, z);
+    parent.add(m);
+    return m;
+  }
+
+  box(0, 0, DESK_Z - 0.7, 260, 200, 1.4, 0xe0e7d7);
+  const shadow = new T.Mesh(
+    new T.PlaneGeometry(62, 92),
+    new T.MeshBasicMaterial({ color: 0x4b5d68, transparent: true, opacity: 0.16 }),
+  );
+  shadow.position.set(2.2, -2.4, DESK_Z + 0.04);
+  scene.add(shadow);
+  box(0, 0, BOARD_Z - 0.15, 56.4, 86.4, 0.5, 0xddd6c8);
+
+  const boardCanvas = document.createElement("canvas");
+  boardCanvas.width = 512;
+  boardCanvas.height = 768;
+  const bctx = boardCanvas.getContext("2d");
+  bctx.fillStyle = "#f6f3ea";
+  bctx.fillRect(0, 0, 512, 768);
+  bctx.fillStyle = "#5a6b76";
+  bctx.font = "bold 20px Inter, sans-serif";
+  bctx.textAlign = "center";
+  bctx.textBaseline = "middle";
+  for (let i = 1; i <= 30; i++) {
+    const worldY = (15.5 - i) * 2.54;
+    const canvasY = 768 * ((worldY + 42.5) / 85);
+    bctx.fillText(String(i), 42, canvasY);
+  }
+  const colXs = [-13.97, -11.43, -8.89, -6.35, -3.81, 3.81, 6.35, 8.89, 11.43, 13.97];
+  const cols = "abcdefghij";
+  for (let c = 0; c < 10; c++) {
+    const canvasX = 512 * ((colXs[c] + 27.5) / 55);
+    bctx.fillText(cols[c], canvasX, 768 * 0.96);
+  }
+  bctx.fillText("+", 512 * ((-20.46 + 27.5) / 55), 768 * 0.96);
+  bctx.fillText("−", 512 * ((-23 + 27.5) / 55), 768 * 0.96);
+  bctx.fillText("+", 512 * ((20.46 + 27.5) / 55), 768 * 0.96);
+  bctx.fillText("−", 512 * ((23 + 27.5) / 55), 768 * 0.96);
+  const boardTexture = new T.CanvasTexture(boardCanvas);
+  boardTexture.needsUpdate = true;
+  const body = new T.Mesh(
+    new T.BoxGeometry(55, 85, BOARD_THICK),
+    new T.MeshStandardMaterial({ map: boardTexture, color: 0xffffff, roughness: 0.82, metalness: 0.04 }),
+  );
+  body.position.set(0, 0, BOARD_Z);
+  scene.add(body);
+  box(0, 0, 0.05, 2.6, 80, 0.1, 0xd0d8d6);
+
+  const traces = new T.Group();
+  scene.add(traces);
+  traces.visible = false;
+  for (const net of new Set(holes.map((h) => h.net))) {
+    const hs = holes.filter((h) => h.net === net);
+    const a = hs[0];
+    const b = hs.at(-1);
+    box(
+      (a.x + b.x) / 2,
+      (a.y + b.y) / 2,
+      BOARD_Z,
+      Math.abs(a.x - b.x) + 1.4,
+      Math.abs(a.y - b.y) + 1.4,
+      0.18,
+      net.includes("+") ? 0xea665a : net.includes("-") ? 0x408dd6 : 0xd2a447,
+      traces,
+    );
+  }
+
+  const holeGeom = new T.CylinderGeometry(0.56, 0.46, 1.05, 14);
+  holeGeom.rotateX(Math.PI / 2);
+  const hitHoles = [];
+  for (const h of holes) {
+    const m = new T.Mesh(
+      holeGeom,
+      new T.MeshStandardMaterial({ color: 0x243038, roughness: 0.92, metalness: 0.08, emissive: 0x000000 }),
+    );
+    m.position.set(h.x, h.y, -0.42);
+    m.userData.hole = h.id;
+    scene.add(m);
+    hitHoles.push(m);
+  }
+
+  const labels = container.querySelector("#labels");
+  for (const x of [-20.46, 20.46]) box(x, 0, 0.12, 0.28, 75, 0.1, 0xe75b50);
+  for (const x of [-23, 23]) box(x, 0, 0.12, 0.28, 75, 0.1, 0x3885c9);
+
+  const roots = new Map();
+  const parts = new Map();
+  const titles = new Map();
+  const loader = new GLTFLoader();
+  let wires = [];
+  const wireObjects = [];
+  const mountObjects = [];
+  const previewWire = []; // 预览线容器
+  let selected = null;
+  let pending = null;
+  let highlighted = [];
+  let xray = false;
+  let mode = "top";
+  let drag = null;
+
+  const texture = new T.CanvasTexture(screenCanvas);
+  texture.magFilter = T.NearestFilter;
+  texture.minFilter = T.NearestFilter;
+
+  await Promise.all(
+    definitions.map(async (d) => {
+      const data = await loader.loadAsync(`./assets/part${d.model}.glb`);
+      const model = data.scene;
+      const g = new T.Group();
+      model.traverse((o) => {
+        if (d.id === "speaker" && HIDE_ON_SPEAKER.test(o.name || "")) {
+          o.visible = false;
+          o.scale.set(0, 0, 0);
+        }
+        if (!o.isMesh) return;
+        o.userData.part = d.id;
+        o.material = o.material.clone();
+      });
+      g.add(model);
+      if (d.id === "mic") g.rotation.x = Math.PI;
+      g.visible = false;
+      scene.add(g);
+      roots.set(d.id, g);
+      const titleLabel = document.createElement("span");
+      titleLabel.className = "partlabel";
+      titleLabel.textContent = d.name;
+      titleLabel.style.display = "none";
+      labels.append(titleLabel);
+      titles.set(d.id, { el: titleLabel, v: new T.Vector3(0, 0, 0) });
+      if (d.id === "oled") {
+        const s = new T.Mesh(
+          new T.PlaneGeometry(23, 11.5),
+          new T.MeshBasicMaterial({ map: texture, side: T.DoubleSide }),
+        );
+        s.position.set(0, -0.1, 1.43);
+        g.add(s);
+      }
+    }),
+  );
+
+  function clear(list) {
+    for (const m of list) {
+      scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    }
+    list.length = 0;
+  }
+
+  function cable(a, b, color, list, arch = 8, radius = 0.32, isPreview = false) {
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const dynamicArch = arch + dist * 0.08; // 根据距离调整弧度
+    const dynamicRadius = radius * 1.5; // 增加线径粗细
+    
+    const curve = new T.CubicBezierCurve3(
+      a,
+      new T.Vector3(a.x, a.y, a.z + dynamicArch * 0.85),
+      new T.Vector3(b.x, b.y, b.z + dynamicArch * 0.85),
+      b,
+    );
+    const mesh = new T.Mesh(
+      new T.TubeGeometry(curve, 32, dynamicRadius, 10, false), // 更多分段和径向分辨率
+      new T.MeshStandardMaterial({ 
+        color, 
+        roughness: 0.42, 
+        metalness: 0.06,
+        transparent: isPreview,
+        opacity: isPreview ? 0.35 : 1.0,
+        depthWrite: !isPreview
+      }),
+    );
+    scene.add(mesh);
+    list.push(mesh);
+  }
+
+  function state() {
+    return [...parts.values()].map((p) => ({ ...p, pos: [...p.pos] }));
+  }
+
+  function seatZ(id) {
+    return id === "speaker" ? SPEAKER_Z : SEATED_Z;
+  }
+
+  function rebuild() {
+    clear(wireObjects);
+    clear(mountObjects);
+    wires.forEach((w, i) => {
+      const a = holeMap.get(w.a);
+      const b = holeMap.get(w.b);
+      if (!a || !b) return;
+      const arch = 7.5 + (i % 4) * 2.4;
+      cable(new T.Vector3(a.x, a.y, 2.55), new T.Vector3(b.x, b.y, 2.55), w.color ?? 0x1595aa, wireObjects, arch, 0.28);
+      for (const h of [a, b]) {
+        const housing = box(h.x, h.y, 1.45, 1.05, 1.05, 2.5, 0x1b242b);
+        const pin = box(h.x, h.y, 0.18, 0.38, 0.38, 0.7, 0xd6b25a);
+        wireObjects.push(housing, pin);
+      }
+    });
+    if (parts.has("amp") && parts.has("speaker")) {
+      const amp = roots.get("amp");
+      const speaker = roots.get("speaker");
+      amp.updateMatrixWorld(true);
+      speaker.updateMatrixWorld(true);
+      const pairs = [
+        { solder: new T.Vector3(-2.4, -7.3, -3.2), color: 0xdd3934, terminalX: 2.05 },
+        { solder: new T.Vector3(2.4, -7.3, -3.2), color: 0x1a1f24, terminalX: -2.05 },
+      ];
+      for (const p of pairs) {
+        const start = speaker.localToWorld(p.solder.clone());
+        const mouth = amp.localToWorld(new T.Vector3(p.terminalX, 10.55, 2.5));
+        const inside = amp.localToWorld(new T.Vector3(p.terminalX, 8.2, 2.0));
+        cable(start, mouth, p.color, mountObjects, 12, 0.45);
+        cable(mouth, inside, 0xc49a4a, mountObjects, 0, 0.28);
+      }
+    }
+  }
+
+  function install(p) {
+    if (p.id === "speaker" && parts.has("amp")) p = speakerPlacement(parts.get("amp"));
+    parts.set(p.id, p);
+    const g = roots.get(p.id);
+    g.visible = true;
+    g.position.set(p.pos[0], p.pos[1], seatZ(p.id));
+    g.rotation.set(p.id === "mic" ? Math.PI : 0, 0, p.rotation);
+    if (p.id === "amp" && parts.has("speaker")) {
+      const sp = speakerPlacement(p);
+      parts.set("speaker", sp);
+      const sg = roots.get("speaker");
+      sg.visible = true;
+      sg.position.set(sp.pos[0], sp.pos[1], SPEAKER_Z);
+      sg.rotation.set(0, 0, sp.rotation);
+    }
+  }
+
+  function setActive(id, on) {
+    if (!on) {
+      parts.delete(id);
+      roots.get(id).visible = false;
+      rebuild();
+      return true;
+    }
+    if (parts.has(id)) return true;
+    let row = defaults[id];
+    if (id !== "speaker" && !validPlacement(state(), id, row, wires)) {
+      row = Array.from({ length: 30 }, (_, i) => i + 1).find((r) => validPlacement(state(), id, r, wires));
+      if (!row) {
+        callbacks.message?.("面包板没有足够的连续空位，请先收回其他零件。");
+        return false;
+      }
+    }
+    install(id === "speaker" ? speakerPlacement(parts.get("amp")) : placement(id, row));
+    rebuild();
+    return true;
+  }
+
+  const pointer = new T.Vector2();
+  const ray = new T.Raycaster();
+  const plane = new T.Plane(new T.Vector3(0, 0, 1), 0);
+
+  function point(e) {
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(pointer, camera);
+    const p = new T.Vector3();
+    ray.ray.intersectPlane(plane, p);
+    return p;
+  }
+
+  function nearest(p) {
+    let best = null;
+    let dist = 1.6;
+    for (const h of holes) {
+      const d = Math.hypot(h.x - p.x, h.y - p.y);
+      if (d < dist) {
+        best = h;
+        dist = d;
+      }
+    }
+    return best;
+  }
+
+  const info = document.createElement("div");
+  info.className = "holeinfo";
+  container.append(info);
+  info.textContent = "";
+
+  let orbit = null;
+  let panning = null;
+  function capture(el, id) {
+    try {
+      el.setPointerCapture(id);
+    } catch {}
+  }
+  container.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 80 : 1;
+      if (e.ctrlKey) {
+        view.zoom = Math.min(5.5, Math.max(0.5, view.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+      } else {
+        panByScreen(e.deltaX * 0.7 * scale, e.deltaY * 0.7 * scale);
+      }
+      applyCamera();
+    },
+    { passive: false },
+  );
+  container.addEventListener("contextmenu", (e) => e.preventDefault());
+  container.addEventListener("auxclick", (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      panning = { x: e.clientX, y: e.clientY };
+      capture(renderer.domElement, e.pointerId);
+      return;
+    }
+    if (e.button === 2) {
+      e.preventDefault();
+      orbit = { x: e.clientX, y: e.clientY, azimuth: view.azimuth, polar: view.polar };
+      capture(renderer.domElement, e.pointerId);
+      return;
+    }
+    if (e.button !== 0) return;
+    const p = point(e);
+    const hit = ray
+      .intersectObjects([...roots.values()].filter((g) => g.visible), true)
+      .find((v) => v.object.visible && v.object.userData.part);
+    if (!hit && mode === "top") {
+      const h = nearest(p);
+      if (h) {
+        selected = null;
+        callbacks.select(null);
+        callbacks.pin(h.id);
+        // 点击孔位后清理预览线（即将创建实体线或取消选择）
+        clear(previewWire);
+        return;
+      }
+    }
+    if (hit) {
+      selected = hit.object.userData.part;
+      callbacks.select(selected);
+      drag = { id: selected, y: p.y, old: parts.get(selected) };
+      capture(renderer.domElement, e.pointerId);
+    }
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (panning) {
+      panByScreen(-(e.clientX - panning.x), -(e.clientY - panning.y));
+      panning = { x: e.clientX, y: e.clientY };
+      applyCamera();
+    } else if (orbit) {
+      view.azimuth = orbit.azimuth - (e.clientX - orbit.x) * 0.01;
+      view.polar = orbit.polar - (e.clientY - orbit.y) * 0.0075;
+      applyCamera();
+    }
+  });
+  function endPointer() {
+    panning = null;
+    orbit = null;
+    if (drag) {
+      drag = null;
+      callbacks.change();
+    }
+  }
+  window.addEventListener("pointerup", endPointer);
+  window.addEventListener("pointercancel", endPointer);
+
+  renderer.domElement.addEventListener("pointermove", (e) => {
+    if (panning || orbit) return;
+    const p = point(e);
+    const h = nearest(p);
+    if (h) {
+      const owner = [...parts.values()].flatMap((part) => footprint(part.id, part.row)).find((v) => v.b === h.id);
+      const blocked = coveredHoles(state()).has(h.id) && !owner;
+      info.textContent =
+        h.id.slice(3) +
+        (owner ? " · " + owner.a : blocked ? " · 被零件挡住，接不了线" : " · " + (occupied(state(), wires).has(h.id) ? "已插线" : "空孔")) +
+        " · " +
+        (h.net.includes("+") || h.net.includes("-")
+          ? "同侧同色轨相通"
+          : "同一行 " + (h.net[0] === "L" ? "a–e" : "f–j") + " 相通");
+    }
+    
+    // 更新预览线
+    if (pending && h && mode === "top") {
+      const fromHole = holeMap.get(pending);
+      if (fromHole && h.id !== pending) {
+        clear(previewWire);
+        const arch = 7.5;
+        cable(
+          new T.Vector3(fromHole.x, fromHole.y, 2.55),
+          new T.Vector3(h.x, h.y, 2.55),
+          0x1595aa,
+          previewWire,
+          arch,
+          0.28,
+          true // 半透明预览
+        );
+      }
+    } else if (previewWire.length > 0) {
+      clear(previewWire);
+    }
+    
+    if (drag && drag.id !== "speaker") {
+      const row = drag.old.row + Math.round((drag.y - p.y) / 2.54);
+      if (validPlacement(state(), drag.id, row, wires)) {
+        install(placement(drag.id, row));
+        rebuild();
+      }
+    }
+  });
+
+  function release() {
+    endPointer();
+  }
+
+  function resize() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    renderer.setSize(w, h, false);
+    const span = Math.max(100, 140 / (w / h));
+    camera.left = (-span * w) / h / 2;
+    camera.right = (span * w) / h / 2;
+    camera.top = span / 2;
+    camera.bottom = -span / 2;
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(container);
+  resize();
+  resetView("top");
+
+  function placeLabel(titleObj, part) {
+    const g = roots.get(part.id);
+    if (!g || !g.visible) {
+      titleObj.el.style.display = "none";
+      return;
+    }
+    const isSelected = selected === part.id;
+    titleObj.el.style.display = isSelected ? "" : "none";
+    if (isSelected) {
+      const offset = part.id === "mic" ? -11 : -17;
+      const worldPos = g.localToWorld(new T.Vector3(0, offset, 0));
+      const projected = worldPos.project(camera);
+      titleObj.el.style.left = ((projected.x + 1) / 2) * container.clientWidth + "px";
+      titleObj.el.style.top = ((1 - projected.y) / 2) * container.clientHeight + "px";
+    }
+  }
+
+  function relatedIds() {
+    if (!selected || !parts.has(selected)) return new Set();
+    if (selected === "speaker" && parts.has("amp")) return new Set(footprint("amp", parts.get("amp").row).map((e) => e.b));
+    return new Set(footprint(selected, parts.get(selected).row).map((e) => e.b));
+  }
+
+  function tint() {}
+
+  function render() {
+    requestAnimationFrame(render);
+    for (const [id, l] of titles) {
+      const isSelected = selected === id && parts.has(id);
+      l.el.style.display = isSelected ? "" : "none";
+      if (isSelected) {
+        const p = parts.get(id);
+        const offset = id === "mic" ? -11 : -17;
+        const g = roots.get(id);
+        const worldPos = g.localToWorld(new T.Vector3(0, offset, 0));
+        const projected = worldPos.project(camera);
+        l.el.style.left = ((projected.x + 1) / 2) * container.clientWidth + "px";
+        l.el.style.top = ((1 - projected.y) / 2) * container.clientHeight + "px";
+      }
+    }
+    for (const id of roots.keys()) {
+      const on = selected === id || (selected === "speaker" && id === "amp") || (selected === "amp" && id === "speaker");
+      tint(id, on && parts.has(id));
+    }
+    const used = occupied(state(), wires);
+    const cover = coveredHoles(state());
+    const selectedPins = relatedIds();
+    const nets = new Set([...selectedPins].map((id) => holeMap.get(id)?.net));
+    const reachable = new Set(
+      selectedPins.size
+        ? holes.filter((h) => nets.has(h.net) && (!cover.has(h.id) || selectedPins.has(h.id))).map((h) => h.id)
+        : highlighted.filter((id) => !cover.has(id) || used.has(id)),
+    );
+    for (let i = 0; i < holes.length; i++) {
+      const id = holes[i].id;
+      const m = hitHoles[i];
+      const blocked = cover.has(id) && !selectedPins.has(id);
+      const lit = selectedPins.has(id) || reachable.has(id);
+      m.material.color.set(
+        selectedPins.has(id)
+          ? 0xffd35a
+          : reachable.has(id)
+            ? 0x19c9a5
+            : blocked
+              ? 0x151c21
+              : used.has(id)
+                ? 0xe08a3c
+                : 0x2a3640,
+      );
+      m.material.emissive.set(selectedPins.has(id) ? 0x6a4a10 : reachable.has(id) ? 0x0a4e40 : 0x000000);
+      m.material.depthTest = !lit;
+      m.renderOrder = lit ? 100 : 0;
+      m.scale.setScalar(lit ? 1.22 : blocked ? 0.82 : 1);
+    }
+    renderer.render(scene, camera);
+  }
+  render();
+
+  return {
+    roots,
+    state,
+    setActive,
+    refreshScreen() {
+      texture.needsUpdate = true;
+    },
+    setWires(v) {
+      wires = v;
+      rebuild();
+    },
+    highlight(ids, from) {
+      highlighted = ids;
+      pending = from;
+      // 当取消高亮或切换起点时，清除预览线
+      if (!from) {
+        clear(previewWire);
+      }
+    },
+    select(id) {
+      selected = id;
+      callbacks.select(id);
+    },
+    setMode(v) {
+      mode = v;
+      resetView(v === "three" ? "three" : "top");
+    },
+    center() {
+      resetView(mode === "three" ? "three" : "top");
+    },
+    rotate() {
+      callbacks.message?.("排针方向固定，以保证每根针脚插入独立孔组；拖动可更换行位。");
+    },
+    flip() {
+      callbacks.message?.("插入面包板的零件不能翻面；可切换 3D 观察。");
+    },
+    restore(ps) {
+      parts.clear();
+      for (const g of roots.values()) g.visible = false;
+      for (const p of ps) {
+        const row = p.row ?? defaults[p.id];
+        if (p.id !== "speaker" && !validPlacement(state(), p.id, row)) throw Error("零件孔位冲突或超出面包板");
+        install(p.id === "speaker" ? speakerPlacement(parts.get("amp")) : placement(p.id, row));
+      }
+      rebuild();
+    },
+    setXray(on) {
+      xray = on;
+      traces.visible = on;
+      body.material.transparent = on;
+      body.material.opacity = on ? 0.22 : 1;
+      for (const g of roots.values()) {
+        g.traverse((o) => {
+          if (o.isMesh) {
+            o.material.transparent = on;
+            o.material.opacity = on ? 0.22 : 1;
+            o.material.depthWrite = !on;
+          }
+        });
+      }
+    },
+    led(on) {
+      const g = roots.get("esp");
+      let b = g.getObjectByName("virtual-led");
+      if (!b) {
+        b = box(4.1, 1.25, 1.6, 1, 1, 0.3, 0x198eff, g);
+        b.name = "virtual-led";
+      }
+      b.visible = on;
+    },
+  };
 }

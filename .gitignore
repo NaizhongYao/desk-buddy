@@ -2,3 +2,5 @@ package/
 *.tgz
 *.log
 node_modules/
+cache/
+temp/
