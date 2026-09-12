@@ -263,6 +263,7 @@ export async function createTable(container, screenCanvas, callbacks) {
   const mountObjects = [];
   const previewWire = []; // 预览线容器
   let selected = null;
+  let selectedWire = null;
   let pending = null;
   let highlighted = [];
   let xray = false;
@@ -343,6 +344,7 @@ export async function createTable(container, screenCanvas, callbacks) {
     );
     scene.add(mesh);
     list.push(mesh);
+    return mesh;
   }
 
   function state() {
@@ -360,11 +362,30 @@ export async function createTable(container, screenCanvas, callbacks) {
       const a = holeMap.get(w.a);
       const b = holeMap.get(w.b);
       if (!a || !b) return;
+      const picked = selectedWire === i;
       const arch = 7.5 + (i % 4) * 2.4;
-      cable(new T.Vector3(a.x, a.y, 2.55), new T.Vector3(b.x, b.y, 2.55), w.color ?? 0x1595aa, wireObjects, arch, 0.28);
+      const tube = cable(
+        new T.Vector3(a.x, a.y, 2.55),
+        new T.Vector3(b.x, b.y, 2.55),
+        picked ? 0xf0b429 : w.color ?? 0x1595aa,
+        wireObjects,
+        arch,
+        picked ? 0.38 : 0.28,
+      );
+      tube.userData.wireIndex = i;
+      if (picked) {
+        tube.material.emissive.setHex(0xffc44d);
+        tube.material.emissiveIntensity = 0.55;
+      }
       for (const h of [a, b]) {
-        const housing = box(h.x, h.y, 1.45, 1.05, 1.05, 2.5, 0x1b242b);
-        const pin = box(h.x, h.y, 0.18, 0.38, 0.38, 0.7, 0xd6b25a);
+        const housing = box(h.x, h.y, 1.45, 1.05, 1.05, 2.5, picked ? 0xf0b429 : 0x1b242b);
+        const pin = box(h.x, h.y, 0.18, 0.38, 0.38, 0.7, picked ? 0xffe08a : 0xd6b25a);
+        housing.userData.wireIndex = i;
+        pin.userData.wireIndex = i;
+        if (picked) {
+          housing.material.emissive.setHex(0xf0b429);
+          housing.material.emissiveIntensity = 0.35;
+        }
         wireObjects.push(housing, pin);
       }
     });
@@ -498,28 +519,53 @@ export async function createTable(container, screenCanvas, callbacks) {
     }
     if (e.button !== 0) return;
     const p = point(e);
+    const wireHits = ray
+      .intersectObjects(wireObjects, false)
+      .filter((v) => v.object.visible && Number.isInteger(v.object.userData.wireIndex));
+    const tubeHit = wireHits.find((v) => v.object.geometry?.type === "TubeGeometry");
+    if (tubeHit) {
+      selected = null;
+      callbacks.select(null);
+      callbacks.pickWire?.(tubeHit.object.userData.wireIndex);
+      return;
+    }
     const hit = ray
       .intersectObjects([...roots.values()].filter((g) => g.visible), true)
       .find((v) => v.object.visible && v.object.userData.part);
     if (hit) {
       selected = hit.object.userData.part;
+      callbacks.pickWire?.(null);
       callbacks.select(selected);
       drag = { id: selected, y: p.y, old: parts.get(selected) };
       capture(renderer.domElement, e.pointerId);
       return;
     }
-    if (mode === "top") {
-      const h = nearest(p);
-      if (h) {
-        selected = null;
-        callbacks.select(null);
-        callbacks.pin(h.id);
-        clear(previewWire);
-        return;
-      }
+    const h = mode === "top" ? nearest(p) : null;
+    if (h && !occupied(state(), wires).has(h.id)) {
+      selected = null;
+      callbacks.select(null);
+      callbacks.pickWire?.(null);
+      callbacks.pin(h.id);
+      clear(previewWire);
+      return;
+    }
+    if (wireHits.length) {
+      selected = null;
+      callbacks.select(null);
+      callbacks.pickWire?.(wireHits[0].object.userData.wireIndex);
+      return;
+    }
+    if (h) {
+      selected = null;
+      callbacks.select(null);
+      callbacks.pickWire?.(null);
+      callbacks.pin(h.id);
+      clear(previewWire);
+      return;
     }
     selected = null;
     callbacks.select(null);
+    callbacks.pickWire?.(null);
     panning = { x: e.clientX, y: e.clientY };
     capture(renderer.domElement, e.pointerId);
   });
@@ -684,8 +730,14 @@ export async function createTable(container, screenCanvas, callbacks) {
     refreshScreen() {
       texture.needsUpdate = true;
     },
-    setWires(v) {
+    setWires(v, picked) {
       wires = v;
+      if (picked !== undefined) selectedWire = picked;
+      if (selectedWire != null && (selectedWire < 0 || selectedWire >= wires.length)) selectedWire = null;
+      rebuild();
+    },
+    setSelectedWire(index) {
+      selectedWire = Number.isInteger(index) ? index : null;
       rebuild();
     },
     highlight(ids, from) {
