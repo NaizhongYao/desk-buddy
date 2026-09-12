@@ -1,5 +1,5 @@
 import { compile, execute } from './dist/runtime.mjs';
-import { examples } from './dist/examples.mjs';
+import { examples, virtualSketch } from './dist/examples.mjs';
 import { Display } from './dist/display.mjs';
 
 const names = Object.keys(examples);
@@ -7,10 +7,11 @@ const results = [];
 
 for (const name of names) {
   const code = examples[name];
+  const src = /ESP_I2S|I2SClass/.test(code) ? virtualSketch(code) : code;
   const row = { name, compile: '?', run: '?', pixels: 0, calls: 0, error: '' };
   let program;
   try {
-    program = compile(code);
+    program = compile(src);
     row.compile = 'OK';
   } catch (e) {
     row.compile = 'FAIL';

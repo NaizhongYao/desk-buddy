@@ -10,6 +10,12 @@ const __dirname = dirname(__filename);
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  if (/\.(html?|mjs|js|css)$/i.test(req.path) || req.path === '/' ) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  }
+  next();
+});
 app.use(express.static('dist'));
 
 const ARDUINO_CLI = process.env.ARDUINO_CLI_PATH || join(process.env.LOCALAPPDATA || 'C:\\Users\\yaost\\AppData\\Local', 'Programs', 'Arduino IDE', 'resources', 'app', 'lib', 'backend', 'resources', 'arduino-cli.exe');

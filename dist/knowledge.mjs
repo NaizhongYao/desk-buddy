@@ -14,6 +14,7 @@ const NAV = [
   { id: "mic", name: "耳朵 麦克风", hint: "能听见声音" },
   { id: "speaker", name: "嘴巴 喇叭", hint: "会发出声音" },
   { id: "wires", name: "电线颜色", hint: "红黑青金" },
+  { id: "test", name: "连通性测试", hint: "屏幕上的 PASS" },
   { id: "faq", name: "常见问题", hint: "卡住了看这里" },
 ];
 
@@ -42,8 +43,8 @@ const PINS = {
     ["LRC", "左右节拍", "告诉喇叭现在轮到左还是右。接到主板 7。"],
     ["BCLK", "小拍子", "声音一位一位往前走的节拍。接到主板 8。"],
     ["DIN", "声音进来", "主板把要说的话从这里送进来。接到主板 9。"],
-    ["GAIN", "音量", "决定喇叭大声还是小声。第一课可以先不接线，模块自己有个默认大小。"],
-    ["SD", "开关", "让功放醒来或睡觉。第一课可以先不接线。"],
+    ["GAIN", "音量", "决定喇叭大声还是小声。这一课可以先不接线，模块自己有个默认大小。"],
+    ["SD", "开关", "让功放醒来或睡觉。这一课可以先不接线。"],
     ["GND", "地线", "回家的路。黑色。接到蓝色地线轨。"],
     ["Vin", "电源", "给功放供电。本实验桌接 3.3V 电源轨；实物供电请按模块说明核对。"],
     ["+", "喇叭正极", "绿色端子的 +。喇叭红线拧进来。"],
@@ -122,6 +123,15 @@ function pinCards(id) {
     .join("")}</div>`;
 }
 
+function videoCard(src, caption) {
+  return `<div class="kb-video-embed">
+    <video controls playsinline preload="metadata" controlslist="nodownload">
+      <source src="${src}" type="video/mp4">
+    </video>
+    <p class="kb-video-caption">${caption}</p>
+  </div>`;
+}
+
 function around(id) {
   if (!AROUND[id]) return "";
   return `<section class="kb-block">
@@ -155,6 +165,7 @@ const PAGES = {
   },
   board() {
     return `<p class="kb-lead">面包板是工作台。上面有很多小孔，零件的针插进去，电就会在板子里面悄悄走，不用焊接。</p>
+      ${videoCard("./assets/breadboard-inside.mp4", "📹 面包板内部是如何连通的")}
       <div class="kb-facts">
         <article><b>中间 30 行</b><p>每一行左边 a–e 是通的，右边 f–j 是通的。中间那条沟过不去，所以大脑可以骑在沟上，左右针脚不会撞车。</p></article>
         <article><b>两边红蓝轨</b><p>红轨送电，蓝轨送回家的路。左边和右边不会自动相通，要用杜邦线把两边的红连红、蓝连蓝。</p></article>
@@ -166,6 +177,7 @@ const PAGES = {
   esp() {
     return `${hero("按住拖动，看看大脑两排针脚")}
       <p class="kb-lead">ESP32-C3 SuperMini 是整台小机器人的大脑。你在右边写的程序，就是让它去指挥眼睛、耳朵和嘴巴。</p>
+      ${videoCard("./assets/esp32-brain.mp4", "📹 ESP32-C3：如何打造桌面机器人的超级大脑")}
       <p>板子上一直亮的红灯是电源灯，表示它吃上电了。会听程序闪的是旁边那颗<strong>蓝灯</strong>，连在针脚 8 上。</p>
       ${around("esp")}<h3>每一根针是什么</h3>${pinCards("esp")}`;
   },
@@ -210,6 +222,25 @@ const PAGES = {
       </div>
       <p>点「已经接好」，实验桌还会自动补上功放、麦克风、喇叭和左右电源轨的线，当作完整参考答案。</p>`;
   },
+  test() {
+    return `<p class="kb-lead">连通性测试是烧进<strong>真实 Desk Buddy</strong> 的体检程序。它会逐个问：屏幕在不在、功放能不能发声、麦克风能不能听见。网页里点「运行」看不懂这些字，请烧录后看小屏幕，或打开串口 115200。</p>
+      <div class="kb-callout">这次如果你看到 OLED PASS、AMP PASS?、MIC PASS p=435，意思是三块都测到了。功放那行的问号，只是程序听不见喇叭，要你用耳朵确认有没有嘀一声。</div>
+      <h3>小屏幕上每一行</h3>
+      <div class="kb-facts">
+        <article><b>OLED PASS / FAIL</b><p>测眼睛。PASS：GND→G、VCC→3.3、SCL→4、SDA→5 通了，地址是 0x3C。FAIL：四根线里有接错、接反或没插到底。</p></article>
+        <article><b>AMP PASS?</b><p>测嘴巴。程序已按 LRC→7、BCLK→8、DIN→9 发出约 1kHz。问号=芯片发出去了，响不响请听喇叭。没声就查绿色端子红+黑−、Vin 和 GND。</p></article>
+        <article><b>MIC PASS p=数字</b><p>测耳朵。WS→20、SCK→21、SD→10。p 是音量峰值，不是错误码。接近 0 才像没接好；几百说明麦克风在工作。对着吹气，p 通常会变大。</p></article>
+        <article><b>look Serial 115200</b><p>不是故障。屏幕太小，完整句子在电脑串口。Arduino 打开串口监视器，波特率 115200，必要时按 RST。</p></article>
+      </div>
+      <h3>常见 FAIL 怎么修</h3>
+      <div class="kb-faq">
+        <details open><summary>OLED FAIL，SCL 和 SDA 接反</summary><p>把 OLED 的 SCL 接到 GPIO4，SDA 接到 GPIO5。不要对调。</p></details>
+        <details><summary>OLED 的 VCC 接到了 5V</summary><p>屏幕只吃 3.3V。从 ESP32 的 5V 拔下来，改插 3.3。</p></details>
+        <details><summary>AMP 驱动过了但没声音</summary><p>不是一分三线本身一定不够电。先听连通性测试那一声：能响就说明供电够。再确认喇叭只进功放绿色端子，示例必须用 I2S，不能用 tone()。</p></details>
+        <details><summary>MIC 的 p 很小或 FAIL</summary><p>查 SD→10、VDD→3.3、GND→G。WS/SCK 接反也会接近全零。测麦克风时 USB 可能暂时掉线，看屏幕即可。</p></details>
+      </div>
+      <p>网页不会自动显示这块板子的串口报告。要看逐句说明，用 Arduino 串口监视器；教师烧录台目前只负责烧录。</p>`;
+  },
   faq() {
     return `<div class="kb-faq">
       <details open><summary>Desk Buddy 会走路吗？</summary><p>不会。它是插在电脑旁边的桌面小宠物，负责眨眼、听话、说话，不会走路也不会转头。</p></details>
@@ -217,9 +248,12 @@ const PAGES = {
       <details><summary>左右两边的红轨是通的吗？</summary><p>不通。左边和右边是两家人。已经接好时，会用一根红线把两边红轨连起来，再用一根黑线把两边蓝轨连起来。</p></details>
       <details><summary>被零件挡住的孔为什么点不了？</summary><p>针已经占满板子下面的空间，杜邦线挤不进去。请点旁边同一组还空着的孔，电在板子里面是通的。</p></details>
       <details><summary>喇叭为什么不能直接接 ESP32？</summary><p>喇叭胃口很大，会把大脑的针脚累坏。一定要经过功放，并且只拧绿色端子。</p></details>
+      <details><summary>积木和代码有什么不一样？</summary><p>右边可以切「积木」或「代码」。积木给小朋友点着玩，引脚由程序自己写好，拼出来就能运行和烧录。代码给老师或 AI 写 Arduino。两种模式不会互相改写：切回去时，积木还是刚才那份。</p></details>
+      <details><summary>声音小游戏怎么玩？</summary><p>切到代码模式，示例里有「声音跳跳」「音量接星星」「拍手打地鼠」。没有按键，对着麦克风拍手或喊一声就是操作。网页用电脑麦克风演示；烧到板子才走零件上的麦克风。</p></details>
       <details><summary>虚拟运行和烧录有什么不一样？</summary><p>点「运行」，程序在网页里假装执行，屏幕画在右边放大窗口里，声音走电脑喇叭。点「连接板子 / 烧录」，才会把程序送到真的 Desk Buddy 身上。</p></details>
-      <details><summary>为什么虚拟运行听不见 I2S 录音？</summary><p>网页里还不会完整模拟 I2S。喇叭示例用 tone()，麦克风示例用电脑麦克风。烧到真板子上才走零件上的那些针脚。</p></details>
-      <details><summary>我想再看介绍视频</summary><p>关掉这个窗口，点顶部的「介绍视频」。也可以勾选「下次进来不再播放」，下次就不会自动跳出。</p></details>
+      <details><summary>为什么虚拟运行听不见真实喇叭？</summary><p>网页「运行」只会让电脑发声。真实 MAX98357 只听 I2S，听不懂 tone()。喇叭/麦克风示例要烧录到板子。连通性测试那一声能响，说明硬件是好的。</p></details>
+      <details><summary>连通性测试屏幕上的 PASS、p=、115200 是什么？</summary><p>打开左边「连通性测试」那一栏，有对照表。</p></details>
+      <details><summary>我想再看介绍视频</summary><p>关掉这个窗口，点顶部的「介绍视频」。一共三集：认识零件、ESP32 大脑、面包板内部。也可以勾选「下次进来不再播放」，下次就不会自动跳出。</p></details>
     </div>`;
   },
 };
@@ -367,9 +401,14 @@ function pinsFor(id) {
     return [name, entry?.[1] || '针脚', entry?.[2] || '请对照板子上的标字。'];
   });
 }
+function partVideo(id) {
+  if (id === "esp") return videoCard("./assets/esp32-brain.mp4", "📹 ESP32-C3：如何打造桌面机器人的超级大脑");
+  return "";
+}
+
 function renderPart(id) {
   const [role,name,description,color] = PROFILES[id];
-  return `<p class="kb-lead">${description}</p><div class="kb-part-layout"><section class="kb-model-panel" style="--part-tint:${color}"><div class="kb-model-label"><span>${role}</span><span>3D 实物模型</span></div>${hero('按住拖动看正反面 · 对照板子上的针脚名字')}<div class="kb-pin-strip" aria-label="选择针脚">${pinsFor(id).map(([pin])=>`<button data-pin="${pin}" style="--pin-color:${tone(pin)}">${pin}</button>`).join('')}</div><p class="kb-diagram-note">按名称选针脚；这里的按钮不是实物位置图。</p><strong class="kb-model-name">${name}</strong></section><section class="kb-pin-inspector"><span class="kb-eyebrow">针脚小翻译</span><h3>这根针，做什么？</h3><p class="kb-muted">点左边的名字，就能看懂它。</p><div id="kb-pin-detail" aria-live="polite"></div></section></div><div class="kb-section-heading"><span>接线备忘</span><h3>这些电线，要去哪里？</h3><p>以下是本实验桌的参考接法。实物要先断电，再核对板上的标字。</p></div>${around(id)}`;
+  return `<p class="kb-lead">${description}</p>${partVideo(id)}<div class="kb-part-layout"><section class="kb-model-panel" style="--part-tint:${color}"><div class="kb-model-label"><span>${role}</span><span>3D 实物模型</span></div>${hero('按住拖动看正反面 · 对照板子上的针脚名字')}<div class="kb-pin-strip" aria-label="选择针脚">${pinsFor(id).map(([pin])=>`<button data-pin="${pin}" style="--pin-color:${tone(pin)}">${pin}</button>`).join('')}</div><p class="kb-diagram-note">按名称选针脚；这里的按钮不是实物位置图。</p><strong class="kb-model-name">${name}</strong></section><section class="kb-pin-inspector"><span class="kb-eyebrow">针脚小翻译</span><h3>这根针，做什么？</h3><p class="kb-muted">点左边的名字，就能看懂它。</p><div id="kb-pin-detail" aria-live="polite"></div></section></div><div class="kb-section-heading"><span>接线备忘</span><h3>这些电线，要去哪里？</h3><p>以下是本实验桌的参考接法。实物要先断电，再核对板上的标字。</p></div>${around(id)}`;
 }
 function selectPin(id, name) {
   const [pin,role,description] = pinsFor(id).find(p=>p[0] === name);
@@ -377,6 +416,7 @@ function selectPin(id, name) {
   $('kb-pin-detail').innerHTML = `<div class="kb-selected-pin" style="--pin-color:${tone(pin)}"><b>${pin}</b><span>${role}</span></div><p>${description}</p><div class="kb-small-tip">找一找：先在实物板上找到 <strong>${pin}</strong>，再决定线插哪里。板子转个方向，名字也不会变。</div>`;
 }
 function renderPage(id) {
+  pauseKnowledgeVideos();
   viewer?.dispose(); viewer = null;
   activePage = id;
   const title = NAV.find(n => n.id === id);
@@ -407,6 +447,79 @@ function writeSkip(on) {
   } catch {}
 }
 
+const INTRO_CLIPS = [
+  {
+    id: "meet",
+    src: "./assets/intro.mp4",
+    kicker: "01 / 认识零件",
+    title: "嗨，小小发明家。<br>先认识你的桌面伙伴",
+    caption: "一块小屏幕、几块电路板，怎么就变成了桌面小伙伴？",
+    tab: "认识零件",
+  },
+  {
+    id: "brain",
+    src: "./assets/esp32-brain.mp4",
+    kicker: "02 / 超级大脑",
+    title: "ESP32-C3<br>是小机器人的大脑",
+    caption: "ESP32-C3：如何打造桌面机器人的超级大脑",
+    tab: "超级大脑",
+  },
+  {
+    id: "board",
+    src: "./assets/breadboard-inside.mp4",
+    kicker: "03 / 面包板",
+    title: "面包板里面<br>电是怎么走的",
+    caption: "面包板内部是如何连通的",
+    tab: "面包板内部",
+  },
+];
+
+let introIndex = 0;
+
+function pauseKnowledgeVideos() {
+  document.querySelectorAll("#knowledge video").forEach((v) => v.pause());
+}
+
+function renderIntroTabs() {
+  const nav = $("intro-chapters");
+  if (!nav) return;
+  nav.replaceChildren(
+    ...INTRO_CLIPS.map((clip, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "intro-chapter";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(i === introIndex));
+      b.innerHTML = `<b>0${i + 1}</b>${clip.tab}`;
+      b.onclick = () => setIntroClip(i, true);
+      return b;
+    }),
+  );
+}
+
+function setIntroClip(index, autoplay) {
+  introIndex = index;
+  const clip = INTRO_CLIPS[index];
+  const video = $("intro-video");
+  const play = $("intro-play");
+  $("intro-title").innerHTML = clip.title;
+  $("intro-sub").textContent = clip.caption;
+  $("intro-film-kicker").textContent = clip.kicker;
+  $("intro-film-caption").textContent = clip.caption;
+    $("intro-start").textContent = index === INTRO_CLIPS.length - 1 ? "看完了，开始实验 →" : "去实验桌，动手试试 →";
+  renderIntroTabs();
+  video.pause();
+  video.src = clip.src;
+  video.load();
+  play.hidden = true;
+  play.textContent = "▶ 播放视频";
+  if (!autoplay) return;
+  const start = video.play();
+  if (start) start.catch(() => {
+    play.hidden = false;
+  });
+}
+
 function closeIntro() {
   const overlay = $("intro-overlay");
   const video = $("intro-video");
@@ -416,21 +529,16 @@ function closeIntro() {
   overlay.setAttribute("aria-hidden", "true");
 }
 
-function showIntro() {
+function showIntro(index = 0) {
   const overlay = $("intro-overlay");
-  const video = $("intro-video");
-  const play = $("intro-play");
   if (!overlay.open) overlay.showModal();
   overlay.setAttribute("aria-hidden", "false");
   $("intro-hide").checked = readSkip();
-  play.hidden = true;
-  const start = video.play();
-  if (start) start.catch(() => {
-    play.hidden = false;
-  });
+  setIntroClip(index, true);
 }
 
 function initIntro() {
+  renderIntroTabs();
   $("intro-overlay").addEventListener("cancel", (e) => { e.preventDefault(); closeIntro(); });
   $("intro-skip").onclick = closeIntro;
   $("intro-start").onclick = closeIntro;
@@ -445,7 +553,11 @@ function initIntro() {
     $("intro-play").hidden = true;
   });
   $("intro-video").addEventListener("ended", () => {
-    $("intro-start").textContent = "看完了，开始实验";
+    if (introIndex < INTRO_CLIPS.length - 1) {
+      setIntroClip(introIndex + 1, true);
+      return;
+    }
+    $("intro-start").textContent = "三集看完了，开始实验 →";
     $("intro-start").focus();
   });
   window.addEventListener("keydown", (e) => {
@@ -453,11 +565,10 @@ function initIntro() {
   });
   $("intro-replay").onclick = () => {
     if ($("knowledge").open) $("knowledge").close();
-    $("intro-video").currentTime = 0;
-    $("intro-start").textContent = "开始实验";
-    showIntro();
+    pauseKnowledgeVideos();
+    showIntro(0);
   };
-  if (!readSkip()) showIntro();
+  if (!readSkip()) showIntro(0);
 }
 
 function initKnowledge() {
@@ -479,6 +590,7 @@ function initKnowledge() {
   };
   $("kb-close").onclick = () => $("knowledge").close();
   $("knowledge").addEventListener("close", () => {
+    pauseKnowledgeVideos();
     viewer?.dispose();
     viewer = null;
   });

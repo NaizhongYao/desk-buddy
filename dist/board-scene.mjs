@@ -1,5 +1,5 @@
 import * as T from "three";
-import { GLTFLoader } from "./vendor/GLTFLoader.js?v=20260912-1";
+import { GLTFLoader } from "./vendor/GLTFLoader.js?v=20260912-5";
 import { definitions } from "./circuit.mjs";
 import {
   holes,
@@ -35,6 +35,8 @@ export async function createTable(container, screenCanvas, callbacks) {
   const view = { panX: 0, panY: 0, zoom: 1, azimuth: 0, polar: 0.28, preset: "top" };
   const TOP_VIEW = { polar: 0.28, azimuth: 0, zoom: 1 };
   const THREE_VIEW = { polar: 1.02, azimuth: 0.72, zoom: 0.92 };
+  const ZOOM_MIN = 0.5;
+  const ZOOM_MAX = 3.2;
   const camRight = new T.Vector3();
   const camUp = new T.Vector3();
 
@@ -75,6 +77,22 @@ export async function createTable(container, screenCanvas, callbacks) {
     view.panY += camRight.y * dx * worldX + camUp.y * -dy * worldY;
   }
 
+  function notifyZoom() {
+    callbacks.zoom?.(view.zoom);
+  }
+
+  function setZoom(next, anchor) {
+    const before = view.zoom;
+    view.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+    if (anchor && Math.abs(view.zoom - before) > 1e-4) {
+      const factor = before / view.zoom;
+      view.panX = anchor.x + (view.panX - anchor.x) * factor;
+      view.panY = anchor.y + (view.panY - anchor.y) * factor;
+    }
+    applyCamera();
+    notifyZoom();
+  }
+
   function resetView(preset = view.preset) {
     const src = preset === "three" ? THREE_VIEW : TOP_VIEW;
     view.preset = preset;
@@ -84,6 +102,7 @@ export async function createTable(container, screenCanvas, callbacks) {
     view.azimuth = src.azimuth;
     view.polar = src.polar;
     applyCamera();
+    notifyZoom();
   }
 
   scene.add(new T.AmbientLight(0xf4f7f8, 0.55));
@@ -118,31 +137,34 @@ export async function createTable(container, screenCanvas, callbacks) {
   box(0, 0, BOARD_Z - 0.15, 56.4, 86.4, 0.5, 0xddd6c8);
 
   const boardCanvas = document.createElement("canvas");
-  boardCanvas.width = 512;
-  boardCanvas.height = 768;
+  boardCanvas.width = 1024;
+  boardCanvas.height = 1536;
   const bctx = boardCanvas.getContext("2d");
   bctx.fillStyle = "#f6f3ea";
-  bctx.fillRect(0, 0, 512, 768);
-  bctx.fillStyle = "#5a6b76";
-  bctx.font = "bold 20px Inter, sans-serif";
+  bctx.fillRect(0, 0, 1024, 1536);
+  bctx.fillStyle = "#2b3338";
+  bctx.font = "700 44px Segoe UI, Microsoft YaHei, sans-serif";
   bctx.textAlign = "center";
   bctx.textBaseline = "middle";
   for (let i = 1; i <= 30; i++) {
     const worldY = (15.5 - i) * 2.54;
-    const canvasY = 768 * ((worldY + 42.5) / 85);
-    bctx.fillText(String(i), 42, canvasY);
+    const canvasY = 1536 * ((worldY + 42.5) / 85);
+    bctx.fillText(String(i), 84, canvasY);
   }
   const colXs = [-13.97, -11.43, -8.89, -6.35, -3.81, 3.81, 6.35, 8.89, 11.43, 13.97];
   const cols = "abcdefghij";
   for (let c = 0; c < 10; c++) {
-    const canvasX = 512 * ((colXs[c] + 27.5) / 55);
-    bctx.fillText(cols[c], canvasX, 768 * 0.96);
+    const canvasX = 1024 * ((colXs[c] + 27.5) / 55);
+    bctx.fillText(cols[c], canvasX, 1536 * 0.96);
   }
-  bctx.fillText("+", 512 * ((-20.46 + 27.5) / 55), 768 * 0.96);
-  bctx.fillText("−", 512 * ((-23 + 27.5) / 55), 768 * 0.96);
-  bctx.fillText("+", 512 * ((20.46 + 27.5) / 55), 768 * 0.96);
-  bctx.fillText("−", 512 * ((23 + 27.5) / 55), 768 * 0.96);
+  bctx.fillStyle = "#9a2b24";
+  bctx.fillText("+", 1024 * ((-20.46 + 27.5) / 55), 1536 * 0.96);
+  bctx.fillText("+", 1024 * ((20.46 + 27.5) / 55), 1536 * 0.96);
+  bctx.fillStyle = "#1d4f86";
+  bctx.fillText("−", 1024 * ((-23 + 27.5) / 55), 1536 * 0.96);
+  bctx.fillText("−", 1024 * ((23 + 27.5) / 55), 1536 * 0.96);
   const boardTexture = new T.CanvasTexture(boardCanvas);
+  boardTexture.anisotropy = 8;
   boardTexture.needsUpdate = true;
   const body = new T.Mesh(
     new T.BoxGeometry(55, 85, BOARD_THICK),
@@ -169,6 +191,49 @@ export async function createTable(container, screenCanvas, callbacks) {
       net.includes("+") ? 0xea665a : net.includes("-") ? 0x408dd6 : 0xd2a447,
       traces,
     );
+  }
+
+  function addEspPinLabels(g) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 640;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, 512, 640);
+    const right = ["5V", "G", "3.3", "4", "3", "2", "1", "0"];
+    const left = ["5", "6", "7", "8", "9", "10", "20", "21"];
+    const boardW = 18;
+    const boardH = 22.5;
+    const toX = (mmX) => ((mmX + boardW / 2) / boardW) * 512;
+    const toY = (mmY) => ((boardH / 2 - mmY) / boardH) * 640;
+    ctx.font = "bold 42px Segoe UI, Microsoft YaHei, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = "rgba(12,18,16,0.92)";
+    ctx.fillStyle = "#f4fff8";
+    left.forEach((name, i) => {
+      const x = toX(-6.2);
+      const y = toY(8.89 - i * 2.54);
+      ctx.textAlign = "left";
+      ctx.strokeText(name, x, y);
+      ctx.fillText(name, x, y);
+    });
+    right.forEach((name, i) => {
+      const x = toX(6.2);
+      const y = toY(8.89 - i * 2.54);
+      ctx.textAlign = "right";
+      ctx.strokeText(name, x, y);
+      ctx.fillText(name, x, y);
+    });
+    const map = new T.CanvasTexture(canvas);
+    map.anisotropy = 8;
+    const plate = new T.Mesh(
+      new T.PlaneGeometry(boardW, boardH),
+      new T.MeshBasicMaterial({ map, transparent: true, depthTest: true, depthWrite: false }),
+    );
+    plate.position.set(0, 0, 1.72);
+    plate.renderOrder = 2;
+    plate.userData.part = "esp";
+    g.add(plate);
   }
 
   const holeGeom = new T.CylinderGeometry(0.56, 0.46, 1.05, 14);
@@ -241,6 +306,7 @@ export async function createTable(container, screenCanvas, callbacks) {
         s.position.set(0, -0.1, 1.43);
         g.add(s);
       }
+      if (d.id === "esp") addEspPinLabels(g);
     }),
   );
 
@@ -402,12 +468,14 @@ export async function createTable(container, screenCanvas, callbacks) {
     (e) => {
       e.preventDefault();
       const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 80 : 1;
-      if (e.ctrlKey) {
-        view.zoom = Math.min(5.5, Math.max(0.5, view.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
-      } else {
-        panByScreen(e.deltaX * 0.7 * scale, e.deltaY * 0.7 * scale);
+      if (e.shiftKey) {
+        panByScreen(e.deltaX * 0.7 * scale || e.deltaY * 0.7 * scale, e.deltaX ? 0 : e.deltaY * 0.7 * scale);
+        applyCamera();
+        return;
       }
-      applyCamera();
+      const world = point(e);
+      const factor = Math.exp(-e.deltaY * 0.0016 * scale);
+      setZoom(view.zoom * factor, world);
     },
     { passive: false },
   );
@@ -433,23 +501,27 @@ export async function createTable(container, screenCanvas, callbacks) {
     const hit = ray
       .intersectObjects([...roots.values()].filter((g) => g.visible), true)
       .find((v) => v.object.visible && v.object.userData.part);
-    if (!hit && mode === "top") {
-      const h = nearest(p);
-      if (h) {
-        selected = null;
-        callbacks.select(null);
-        callbacks.pin(h.id);
-        // 点击孔位后清理预览线（即将创建实体线或取消选择）
-        clear(previewWire);
-        return;
-      }
-    }
     if (hit) {
       selected = hit.object.userData.part;
       callbacks.select(selected);
       drag = { id: selected, y: p.y, old: parts.get(selected) };
       capture(renderer.domElement, e.pointerId);
+      return;
     }
+    if (mode === "top") {
+      const h = nearest(p);
+      if (h) {
+        selected = null;
+        callbacks.select(null);
+        callbacks.pin(h.id);
+        clear(previewWire);
+        return;
+      }
+    }
+    selected = null;
+    callbacks.select(null);
+    panning = { x: e.clientX, y: e.clientY };
+    capture(renderer.domElement, e.pointerId);
   });
   window.addEventListener("pointermove", (e) => {
     if (panning) {
@@ -587,29 +659,19 @@ export async function createTable(container, screenCanvas, callbacks) {
     const nets = new Set([...selectedPins].map((id) => holeMap.get(id)?.net));
     const reachable = new Set(
       selectedPins.size
-        ? holes.filter((h) => nets.has(h.net) && (!cover.has(h.id) || selectedPins.has(h.id))).map((h) => h.id)
-        : highlighted.filter((id) => !cover.has(id) || used.has(id)),
+        ? holes.filter((h) => nets.has(h.net) && !cover.has(h.id) && !used.has(h.id)).map((h) => h.id)
+        : highlighted.filter((id) => !cover.has(id) && !used.has(id)),
     );
     for (let i = 0; i < holes.length; i++) {
       const id = holes[i].id;
       const m = hitHoles[i];
-      const blocked = cover.has(id) && !selectedPins.has(id);
-      const lit = selectedPins.has(id) || reachable.has(id);
-      m.material.color.set(
-        selectedPins.has(id)
-          ? 0xffd35a
-          : reachable.has(id)
-            ? 0x19c9a5
-            : blocked
-              ? 0x151c21
-              : used.has(id)
-                ? 0xe08a3c
-                : 0x2a3640,
-      );
-      m.material.emissive.set(selectedPins.has(id) ? 0x6a4a10 : reachable.has(id) ? 0x0a4e40 : 0x000000);
-      m.material.depthTest = !lit;
-      m.renderOrder = lit ? 100 : 0;
-      m.scale.setScalar(lit ? 1.22 : blocked ? 0.82 : 1);
+      const blocked = cover.has(id);
+      const lit = reachable.has(id);
+      m.material.color.set(lit ? 0x19c9a5 : blocked ? 0x151c21 : used.has(id) ? 0xe08a3c : 0x2a3640);
+      m.material.emissive.set(lit ? 0x0a4e40 : 0x000000);
+      m.material.depthTest = true;
+      m.renderOrder = 0;
+      m.scale.setScalar(lit ? 1.12 : blocked ? 0.82 : 1);
     }
     renderer.render(scene, camera);
   }
@@ -644,6 +706,15 @@ export async function createTable(container, screenCanvas, callbacks) {
     },
     center() {
       resetView(mode === "three" ? "three" : "top");
+    },
+    zoomBy(factor) {
+      setZoom(view.zoom * factor);
+    },
+    zoomTo(value) {
+      setZoom(value);
+    },
+    getZoom() {
+      return view.zoom;
     },
     rotate() {
       callbacks.message?.("排针方向固定，以保证每根针脚插入独立孔组；拖动可更换行位。");
