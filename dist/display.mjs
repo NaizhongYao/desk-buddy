@@ -8,5 +8,166 @@ export class Display{
  rect(x,y,w,h,c,fill=false,r=0){[x,y,w,h,r]=[x,y,w,h,r].map(Math.trunc);r=Math.max(0,Math.min(r,w/2,h/2));for(let yy=Math.max(0,y);yy<Math.min(64,y+h);yy++)for(let xx=Math.max(0,x);xx<Math.min(128,x+w);xx++){let inside=(px,py)=>{if(px<x||px>=x+w||py<y||py>=y+h)return false;let cx=Math.max(x+r-.5,Math.min(px,x+w-r-.5)),cy=Math.max(y+r-.5,Math.min(py,y+h-r-.5));return !r||((px-cx)**2+(py-cy)**2<=r*r);};if(inside(xx,yy)&&(fill||!inside(xx-1,yy)||!inside(xx+1,yy)||!inside(xx,yy-1)||!inside(xx,yy+1)))this.pixel(xx,yy,c);}}
  circle(x,y,r,c,fill=false){[x,y,r]=[x,y,r].map(Math.trunc);if(r<0||r>1024)throw Error('圆的半径请使用 0–1024');if(fill){for(let yy=Math.max(0,y-r);yy<=Math.min(63,y+r);yy++)for(let xx=Math.max(0,x-r);xx<=Math.min(127,x+r);xx++)if((xx-x)**2+(yy-y)**2<=r*r)this.pixel(xx,yy,c);}else{let px=0,py=r,d=1-r;while(px<=py){for(const [a,b] of [[px,py],[py,px],[-px,py],[-py,px],[px,-py],[py,-px],[-px,-py],[-py,-px]])this.pixel(x+a,y+b,c);px++;if(d<0)d+=2*px+1;else{py--;d+=2*(px-py)+1;}}}}
 	 print(v,newline=false){for(const ch of String(v)){if(ch==='\n'){this.x=0;this.y+=8*this.size;continue;}if(this.x+6*this.size>128){this.x=0;this.y+=8*this.size;}const glyph=FONT[ch.toUpperCase()];if(!glyph){this.x+=6*this.size;continue;}glyph.forEach((row,y)=>[...row].forEach((v,x)=>{if(v==='1')this.rect(this.x+x*this.size,this.y+y*this.size,this.size,this.size,this.color,true);}));this.x+=6*this.size;}if(newline){this.x=0;this.y+=8*this.size;}}
- render(ctx,on=true){const im=ctx.createImageData(128,64);for(let i=0;i<this.pixels.length;i++){const lit=on&&(this.invert?!this.pixels[i]:this.pixels[i]);im.data.set(lit?[126,235,255,255]:[5,13,20,255],i*4);}ctx.putImageData(im,0,0);}
-}
+	 render(ctx,on=true){const im=ctx.createImageData(128,64);for(let i=0;i<this.pixels.length;i++){const lit=on&&(this.invert?!this.pixels[i]:this.pixels[i]);im.data.set(lit?[126,235,255,255]:[5,13,20,255],i*4);}ctx.putImageData(im,0,0);}
+		 paintHotspot(ssid){
+		  this.reset();
+		  this.size=1;
+		  this.color=1;
+		  this.x=0;this.y=0;
+		  this.print('PLUG USB',true);
+		  this.print('WIFI AP:',true);
+		  this.print(String(ssid||'DeskBuddy'),true);
+		  this.print('OPEN',true);
+		  this.print('192.168.4.1',true);
+		 }
+		 paintConnecting(){
+		  this.reset();
+		  this.size=1;
+		  this.color=1;
+		  this.x=0;this.y=0;
+		  this.print('PLUG USB',true);
+		  this.print('WIFI...',true);
+		  this.print('JOINING',true);
+		  this.print('HOME NET',true);
+		 }
+			 paintWifiOk(ssid){
+			  this.reset();
+			  this.size=1;
+			  this.color=1;
+			  this.x=0;this.y=0;
+			  this.print('WIFI OK',true);
+			  this.print('JOINED',true);
+			  const ascii=String(ssid||'').replace(/[^\x20-\x7E]/g,'').trim().slice(0,16);
+			  this.print(ascii||'HOME WIFI',true);
+			  this.print('WAIT KEY',true);
+			 }
+			 paintKeyCheck(){
+			  this.reset();
+			  this.size=1;
+			  this.color=1;
+			  this.x=0;this.y=0;
+			  this.print('WIFI OK',true);
+			  this.print('KEY...',true);
+			  this.print('CHECKING',true);
+			 }
+			 paintKeyOk(){
+			  this.reset();
+			  this.size=1;
+			  this.color=1;
+			  this.x=0;this.y=0;
+			  this.print('WIFI OK',true);
+			  this.print('KEY OK',true);
+			  this.print('WAIT TALK',true);
+			 }
+				 paintKeyBad(){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  this.print('WIFI OK',true);
+				  this.print('KEY BAD',true);
+				  this.print('RETRY KEY',true);
+				 }
+				 paintListening(){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  this.print('WIFI OK',true);
+				  this.print('LISTEN',true);
+				  this.print('SPEAK NOW',true);
+				 }
+				 paintListenWait(){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  this.print('WIFI OK',true);
+				  this.print('LISTEN',true);
+				  this.print('WRITING',true);
+				 }
+				 paintHeard(text){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  const raw=String(text||'').replace(/\s+/g,' ').trim();
+				  const ascii=raw.replace(/[^\x20-\x7E]/g,'').trim().slice(0,32);
+				  if(!raw){
+				    this.print('DIDNT HEAR',true);
+				    this.print('TRY AGAIN',true);
+				    return;
+				  }
+				  this.print('HEARD',true);
+				  if(!ascii){
+				    this.print('CHINESE',true);
+				    this.print('SEE TOAST',true);
+				    return;
+				  }
+				  this.print(ascii.slice(0,16),true);
+				  if(ascii.length>16) this.print(ascii.slice(16,32),true);
+				 }
+				 paintListenBad(){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  this.print('LISTEN BAD',true);
+				  this.print('RETRY',true);
+				 }
+				 paintThinking(){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  this.print('WIFI OK',true);
+				  this.print('THINK...',true);
+				  this.print('WRITING',true);
+				 }
+				 paintReply(text){
+				  this.reset();
+				  this.size=1;
+				  this.color=1;
+				  this.x=0;this.y=0;
+				  const raw=String(text||'').replace(/\s+/g,' ').trim();
+				  const ascii=raw.replace(/[^\x20-\x7E]/g,'').trim().slice(0,32);
+				  this.print('REPLY',true);
+				  if(!raw){
+				    this.print('NO TEXT',true);
+				    this.print('TRY AGAIN',true);
+				    return;
+				  }
+				  if(!ascii){
+				    this.print('CHINESE',true);
+				    this.print('SEE TOAST',true);
+				    return;
+				  }
+				  this.print(ascii.slice(0,16),true);
+				  if(ascii.length>16) this.print(ascii.slice(16,32),true);
+				 }
+					 paintReplyBad(){
+					  this.reset();
+					  this.size=1;
+					  this.color=1;
+					  this.x=0;this.y=0;
+					  this.print('REPLY BAD',true);
+					  this.print('RETRY',true);
+					 }
+					 paintSpeaking(){
+					  this.reset();
+					  this.size=1;
+					  this.color=1;
+					  this.x=0;this.y=0;
+					  this.print('WIFI OK',true);
+					  this.print('SPEAKING',true);
+					  this.print('LISTEN',true);
+					 }
+					 paintSpeakBad(){
+					  this.reset();
+					  this.size=1;
+					  this.color=1;
+					  this.x=0;this.y=0;
+					  this.print('SPEAK BAD',true);
+					  this.print('RETRY',true);
+					 }
+				}

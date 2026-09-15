@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {compile,execute} from './dist/runtime.mjs';
 import {examples,virtualSketch} from './dist/examples.mjs';
-import {checkCircuit,lessonWires,validateProject,newPartsForLesson,keepWiresFromPreviousLessons,wireTouchesPart,newWiresForLesson,previousWiresForLesson} from './dist/circuit.mjs';
+import {checkCircuit,lessonWires,validateProject,newPartsForLesson,keepWiresFromPreviousLessons,wireTouchesPart,newWiresForLesson,previousWiresForLesson,COMPANION_PARTS} from './dist/circuit.mjs';
 import {footprint,placement} from './dist/breadboard.mjs';
 import {Display} from './dist/display.mjs';
 for(const [name,code] of Object.entries(examples)){
@@ -48,7 +48,11 @@ assert.ok(newWiresForLesson(2).every(w=>w[0].startsWith('amp:')));
 assert.equal(previousWiresForLesson(3).length,9);
 assert.equal(newWiresForLesson(3).length,5);
 assert.ok(newWiresForLesson(3).every(w=>w[0].startsWith('mic:')));
+assert.deepEqual(COMPANION_PARTS,['esp','oled','amp','mic','speaker','btn']);
+assert.ok(footprint('btn',16).some(e=>e.a==='btn:SIG'&&e.b==='bb:f16'));
 const d=new Display();d.circle(40,32,14,1,true);assert.equal(d.pixels[32*128+40],1);assert.equal(d.pixels[0],0);
+d.paintHotspot('DeskBuddy-A3F2');
+assert.ok(d.pixels.some(v=>v===1),'热点画面应画出文字');
 const controller=new AbortController(),calls=[];
 try{await execute(compile('void setup(){}void loop(){for(int x=0;x<3;x++){Serial.println(x);}delay(1);}'),{call(n,a){calls.push([n,...a]);if(calls.length===3)controller.abort();}},controller.signal);}catch(e){assert.equal(e.message,'STOPPED');}
 assert.deepEqual(calls,[['Serial.println',0],['Serial.println',1],['Serial.println',2]]);

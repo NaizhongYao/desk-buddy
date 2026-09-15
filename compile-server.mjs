@@ -4,12 +4,13 @@ import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import crypto from 'crypto';
+import { classifyKeyHealth, classifyAsr, classifyChat, classifyTts } from './dist/provision.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
   if (/\.(html?|mjs|js|css)$/i.test(req.path) || req.path === '/' ) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -188,6 +189,254 @@ app.post('/api/compile', async (req, res) => {
       details: err.stderr || err.stdout,
       timestamp: new Date().toISOString()
     });
+  }
+});
+
+function isLocalTeacher(req) {
+  const host = String(req.hostname || '').toLowerCase();
+  const ip = String(req.socket?.remoteAddress || '');
+  const localHost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  const localPeer = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  return localHost && localPeer;
+}
+
+app.post('/api/minimax/health', async (req, res) => {
+  if (!isLocalTeacher(req)) {
+    return res.status(403).json({ ok: false, code: 'student', message: '学生页不会把钥匙发到网上。请到老师电脑上的教师台检查。' });
+  }
+  const key = String(req.body?.key || '').trim();
+  if (!key || key.length > 256) {
+    return res.status(400).json({ ok: false, code: 'auth', message: '这把 MiniMax 钥匙不对。请让大人再填一次。' });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const upstream = await fetch('https://api.minimax.cn/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + key,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'MiniMax-M2.5-highspeed',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_completion_tokens: 1,
+        thinking: { type: 'disabled' },
+      }),
+      signal: controller.signal,
+    });
+    let body = {};
+    try { body = await upstream.json(); } catch { body = {}; }
+    const result = classifyKeyHealth({ httpStatus: upstream.status, body });
+    console.log(`[钥匙] ${result.ok ? '通过' : '未通过'} code=${result.code} http=${upstream.status}`);
+    res.json(result);
+  } catch (err) {
+    const result = classifyKeyHealth({ networkError: true });
+    console.log(`[钥匙] 网络失败: ${err.name}`);
+    res.status(502).json(result);
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+function decodeWavBase64(audio) {
+  const raw = String(audio || '').replace(/\s/g, '');
+  if (!raw || raw.length > 1_600_000) return null;
+  let buf;
+  try { buf = Buffer.from(raw, 'base64'); } catch { return null; }
+  if (buf.length < 44 || buf.length > 400_000) return null;
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return null;
+  return buf;
+}
+
+async function postMiniMaxAsr(key, wav, signal) {
+  const urls = [
+    'https://api.minimax.cn/v1/speech_to_text',
+    'https://api.minimaxi.com/v1/speech_to_text',
+  ];
+  let last = { httpStatus: 0, body: {}, host: 'cn' };
+  for (const url of urls) {
+    const form = new FormData();
+    form.append('model', 'asr-1.0');
+    form.append('response_format', 'json');
+    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'clip.wav');
+    const upstream = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + key,
+        language: 'zh',
+      },
+      body: form,
+      signal,
+    });
+    let body = {};
+    try { body = await upstream.json(); } catch { body = {}; }
+    last = {
+      httpStatus: upstream.status,
+      body,
+      host: url.includes('minimax.cn') ? 'cn' : 'com',
+    };
+    if (upstream.status !== 404) return last;
+  }
+  return last;
+}
+
+app.post('/api/minimax/asr', async (req, res) => {
+  if (!isLocalTeacher(req)) {
+    return res.status(403).json({ ok: false, code: 'student', text: '', message: '学生页不会把声音发到网上。请到老师电脑上的教师台开始听。' });
+  }
+  const key = String(req.body?.key || '').trim();
+  if (!key || key.length > 256) {
+    return res.status(400).json({ ok: false, code: 'auth', text: '', message: '这把 MiniMax 钥匙听写时不被接受。请让大人再填一次。' });
+  }
+  const wav = decodeWavBase64(req.body?.audio);
+  if (!wav) {
+    return res.status(400).json({ ok: false, code: 'format', text: '', message: '这段声音 MiniMax 听不懂。请再靠近麦克风说一次。' });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const upstream = await postMiniMaxAsr(key, wav, controller.signal);
+    const result = classifyAsr(upstream);
+    console.log(`[听写] ${result.ok ? '完成' : '失败'} code=${result.code} http=${upstream.httpStatus} host=${upstream.host} bytes=${wav.length}`);
+    res.json(result);
+  } catch (err) {
+    const result = classifyAsr({ networkError: true });
+    console.log(`[听写] 网络失败: ${err.name}`);
+    res.status(502).json(result);
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+const BUDDY_SYSTEM = '你是 Desk Buddy，插在桌上的小机器人。用中文回答 12 岁小朋友。一到两句，短、暖、具体。不要列清单，不要说自己是 AI。';
+
+app.post('/api/minimax/chat', async (req, res) => {
+  if (!isLocalTeacher(req)) {
+    return res.status(403).json({ ok: false, code: 'student', reply: '', message: '学生页不会把话发到网上。请到老师电脑上的教师台说话。' });
+  }
+  const key = String(req.body?.key || '').trim();
+  if (!key || key.length > 256) {
+    return res.status(400).json({ ok: false, code: 'auth', reply: '', message: '这把 MiniMax 钥匙回答时不被接受。请让大人再填一次。' });
+  }
+  const heard = String(req.body?.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!heard) {
+    return res.status(400).json({ ok: false, code: 'empty', reply: '', message: '没听清。请再靠近麦克风说一次。' });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const upstream = await fetch('https://api.minimax.cn/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + key,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'MiniMax-M3',
+        messages: [
+          { role: 'system', content: BUDDY_SYSTEM },
+          { role: 'user', content: heard },
+        ],
+        max_completion_tokens: 80,
+        thinking: { type: 'disabled' },
+      }),
+      signal: controller.signal,
+    });
+    let body = {};
+    try { body = await upstream.json(); } catch { body = {}; }
+    const result = classifyChat({ httpStatus: upstream.status, body });
+    console.log(`[回答] ${result.ok ? '完成' : '失败'} code=${result.code} http=${upstream.status} chars=${heard.length}`);
+    res.json(result);
+  } catch (err) {
+    const result = classifyChat({ networkError: true });
+    console.log(`[回答] 网络失败: ${err.name}`);
+    res.status(502).json(result);
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+function hexToBase64(hex) {
+  return Buffer.from(hex, 'hex').toString('base64');
+}
+
+async function postMiniMaxTts(key, text, signal) {
+  const urls = [
+    'https://api.minimax.cn/v1/t2a_v2',
+    'https://api.minimaxi.com/v1/t2a_v2',
+  ];
+  const models = ['speech-2.6-turbo', 'speech-02-turbo'];
+  let last = { httpStatus: 0, body: {}, host: 'cn' };
+  for (const url of urls) {
+    for (const model of models) {
+      const upstream = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + key,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          text,
+          stream: false,
+          voice_setting: {
+            voice_id: 'female-shaonv',
+            speed: 1,
+            vol: 1,
+            pitch: 0,
+          },
+          audio_setting: {
+            sample_rate: 32000,
+            bitrate: 128000,
+            format: 'mp3',
+            channel: 1,
+          },
+        }),
+        signal,
+      });
+      let body = {};
+      try { body = await upstream.json(); } catch { body = {}; }
+      last = {
+        httpStatus: upstream.status,
+        body,
+        host: url.includes('minimax.cn') ? 'cn' : 'com',
+      };
+      if (upstream.status === 404) continue;
+      const blob = JSON.stringify(body);
+      if (/unknown model|invalid model|model_not|模型不存在|model.*not found/i.test(blob) && model !== models[models.length - 1]) continue;
+      return last;
+    }
+  }
+  return last;
+}
+
+app.post('/api/minimax/tts', async (req, res) => {
+  if (!isLocalTeacher(req)) {
+    return res.status(403).json({ ok: false, code: 'student', audio: '', message: '学生页不会把话发到网上出声。请到老师电脑上的教师台说话。' });
+  }
+  const key = String(req.body?.key || '').trim();
+  if (!key || key.length > 256) {
+    return res.status(400).json({ ok: false, code: 'auth', audio: '', message: '这把 MiniMax 钥匙出声时不被接受。请让大人再填一次。' });
+  }
+  const spoken = String(req.body?.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!spoken) {
+    return res.status(400).json({ ok: false, code: 'empty', audio: '', message: '它想了一下，但没写出字，所以没有声音。' });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const upstream = await postMiniMaxTts(key, spoken, controller.signal);
+    const result = classifyTts(upstream);
+    const audio = result.ok ? hexToBase64(result.hex) : '';
+    console.log(`[出声] ${result.ok ? '完成' : '失败'} code=${result.code} http=${upstream.httpStatus} host=${upstream.host} chars=${spoken.length} audio=${audio.length}`);
+    res.json({ ok: result.ok, code: result.code, audio, message: result.message });
+  } catch (err) {
+    const result = classifyTts({ networkError: true });
+    console.log(`[出声] 网络失败: ${err.name}`);
+    res.status(502).json({ ok: false, code: result.code, audio: '', message: result.message });
+  } finally {
+    clearTimeout(timer);
   }
 });
 

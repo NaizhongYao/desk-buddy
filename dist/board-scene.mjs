@@ -117,6 +117,31 @@ export async function createTable(container, screenCanvas, callbacks) {
   rim.position.set(10, -80, 40);
   scene.add(rim);
 
+  function makeTalkButton() {
+    const g = new T.Group();
+    const pcb = box(0, 0, 0.8, 12.2, 12.2, 1.6, 0x1c2420, g);
+    pcb.userData.part = "btn";
+    const legs = [
+      [-3.8, -5.6],
+      [3.8, -5.6],
+      [-3.8, 5.6],
+      [3.8, 5.6],
+    ];
+    for (const [x, y] of legs) {
+      const leg = box(x, y, -0.4, 0.7, 0.7, 2.4, 0xc9b27a, g);
+      leg.userData.part = "btn";
+    }
+    const stem = box(0, 0, 1.85, 6.4, 6.4, 0.7, 0x2a3330, g);
+    stem.userData.part = "btn";
+    const cap = box(0, 0, 2.55, 8.2, 8.2, 1.6, 0xd45b28, g);
+    cap.userData.part = "btn";
+    cap.name = "talk-cap";
+    g.traverse((o) => {
+      if (o.isMesh) o.userData.part = "btn";
+    });
+    return g;
+  }
+
   function box(x, y, z, w, h, d, color, parent = scene) {
     const m = new T.Mesh(
       new T.BoxGeometry(w, h, d),
@@ -276,19 +301,21 @@ export async function createTable(container, screenCanvas, callbacks) {
 
   await Promise.all(
     definitions.map(async (d) => {
-      const data = await loader.loadAsync(`./assets/part${d.model}.glb`);
-      const model = data.scene;
-      const g = new T.Group();
-      model.traverse((o) => {
-        if (d.id === "speaker" && HIDE_ON_SPEAKER.test(o.name || "")) {
-          o.visible = false;
-          o.scale.set(0, 0, 0);
-        }
-        if (!o.isMesh) return;
-        o.userData.part = d.id;
-        o.material = o.material.clone();
-      });
-      g.add(model);
+      const g = d.model < 0 ? makeTalkButton() : new T.Group();
+      if (d.model >= 0) {
+        const data = await loader.loadAsync(`./assets/part${d.model}.glb`);
+        const model = data.scene;
+        model.traverse((o) => {
+          if (d.id === "speaker" && HIDE_ON_SPEAKER.test(o.name || "")) {
+            o.visible = false;
+            o.scale.set(0, 0, 0);
+          }
+          if (!o.isMesh) return;
+          o.userData.part = d.id;
+          o.material = o.material.clone();
+        });
+        g.add(model);
+      }
       if (d.id === "mic") g.rotation.x = Math.PI;
       g.visible = false;
       scene.add(g);
@@ -352,7 +379,9 @@ export async function createTable(container, screenCanvas, callbacks) {
   }
 
   function seatZ(id) {
-    return id === "speaker" ? SPEAKER_Z : SEATED_Z;
+    if (id === "speaker") return SPEAKER_Z;
+    if (id === "btn") return 1.2;
+    return SEATED_Z;
   }
 
   function rebuild() {

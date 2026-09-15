@@ -28,7 +28,7 @@ for (const net of new Set(holes.map((h) => h.net))) {
   const group = holes.filter((h) => h.net === net);
   for (const h of group.slice(1)) internal.push({ a: group[0].id, b: h.id });
 }
-export const defaults = { esp: 2, oled: 12, amp: 18, mic: 27, speaker: 30 };
+export const defaults = { esp: 2, oled: 12, amp: 18, mic: 27, speaker: 30, btn: 16 };
 
 export function footprint(id, row = defaults[id]) {
   let pairs = [];
@@ -48,6 +48,7 @@ export function footprint(id, row = defaults[id]) {
     ];
   }
   if (id === "speaker") pairs = [];
+  if (id === "btn") pairs = [["GND", "e", 0], ["SIG", "f", 0]];
   return pairs.map(([p, c, i]) => ({ a: `${id}:${p}`, b: `bb:${c}${row + i}` }));
 }
 
@@ -69,7 +70,9 @@ export function placement(id, row = defaults[id]) {
           ? [25.87, y - 3.81]
           : id === "amp"
             ? [-22.32, y - 7.62]
-            : [0, (14.5 - row) * 2.54],
+            : id === "btn"
+              ? [0, y]
+              : [0, (14.5 - row) * 2.54],
     rotation: id === "oled" || id === "amp" ? Math.PI / 2 : 0,
     flipped: false,
   };
@@ -97,6 +100,7 @@ export const bodyHalf = {
   oled: [13.6, 13.6],
   amp: [10.2, 13.2],
   mic: [8.0, 8.0],
+  btn: [6.2, 3.6],
 };
 
 export function underBody(part, hole) {

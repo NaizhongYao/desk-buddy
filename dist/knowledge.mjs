@@ -13,6 +13,7 @@ const NAV = [
   { id: "amp", name: "功放", hint: "帮喇叭说话" },
   { id: "mic", name: "耳朵 麦克风", hint: "能听见声音" },
   { id: "speaker", name: "嘴巴 喇叭", hint: "会发出声音" },
+  { id: "btn", name: "说话按键", hint: "按下才通" },
   { id: "wires", name: "电线颜色", hint: "红黑青金" },
   { id: "test", name: "连通性测试", hint: "屏幕上的 PASS" },
   { id: "faq", name: "常见问题", hint: "卡住了看这里" },
@@ -25,7 +26,8 @@ const PINS = {
     ["3.3", "电源", "3.3 伏特，小零件的午饭。屏幕、麦克风、功放都吃这个。红色线。"],
     ["4", "时钟 SCL", "给屏幕报时：现在可以传画面了。接 OLED 的 SCL。金色线。"],
     ["5", "数据 SDA", "把画面内容传给屏幕。接 OLED 的 SDA。青色线。"],
-    ["0 / 1 / 2 / 3 / 6", "先留着", "现在课上先不用。以后想接开关、灯或其他小零件，再来用它们。"],
+    ["0", "说话按键", "对话模式里接到轻触按键的 SIG。按下才通，不是 RST，也不是 BOOT。"],
+    ["1 / 2 / 3 / 6", "先留着", "现在课上先不用。以后想接灯或其他小零件，再来用它们。"],
     ["7", "功放节拍", "已经接好时，接到功放的 LRC，告诉喇叭现在是左声道还是右声道。"],
     ["8", "蓝灯 / 功放节拍", "板子上那颗可编程的蓝灯就在这根针。已经接好时，也接到功放的 BCLK，给声音打拍子。"],
     ["9", "声音数据", "已经接好时，把要说的话送给功放的 DIN。"],
@@ -62,6 +64,10 @@ const PINS = {
     ["+", "红线", "喇叭的正极。剥掉一点皮，拧进功放绿色端子的 +。不插面包板。"],
     ["−", "黑线", "喇叭的负极。拧进功放绿色端子的 −。千万不要直接插到 ESP32 上。"],
   ],
+  btn: [
+    ["GND", "地线", "回家的路。黑色。接到蓝色地线轨。"],
+    ["SIG", "信号", "按下时接通。青色。接到主板的 0。不是 RST，也不是 BOOT。"],
+  ],
 };
 
 const AROUND = {
@@ -76,6 +82,7 @@ const AROUND = {
     ["青", "20 → 麦克风 WS", "给耳朵对齐拍子。已经接好才会出现。"],
     ["青", "21 → 麦克风 SCK", "给耳朵打小拍子。已经接好才会出现。"],
     ["青", "10 → 麦克风 SD", "把听到的声音收回大脑。已经接好才会出现。"],
+    ["青", "0 → 按键 SIG", "对话模式才会接上。按下才通，用来开始听。"],
   ],
   oled: [
     ["黑", "GND → 右边蓝轨", "屏幕的电做完事情回家。"],
@@ -102,6 +109,10 @@ const AROUND = {
   speaker: [
     ["红", "红线 → 功放 +", "从喇叭身子直接走进绿色端子，不插孔。"],
     ["黑", "黑线 → 功放 −", "同样不插面包板。"],
+  ],
+  btn: [
+    ["黑", "GND → 右边蓝轨", "按键回家。"],
+    ["青", "SIG → 主板 0", "按下才通。对话模式才会接上。"],
   ],
 };
 
@@ -205,6 +216,13 @@ const PAGES = {
       <div class="kb-callout">记住口诀：红加黑减，只进绿色端子，不进大脑。</div>
       ${around("speaker")}<h3>每一根针是什么</h3>${pinCards("speaker")}`;
   },
+  btn() {
+    return `${hero("这是说话按键，不是 RST")}
+      <p class="kb-lead">12×12mm 带帽轻触按键。按下才通，松开就弹回来。它不是拨动开关，也不是主板上的 RST 或 BOOT。</p>
+      <div class="kb-callout">RST 会让整台机器人重新开机。BOOT 在这块 ESP32-C3 上连着 GPIO9，而 GPIO9 已经接去功放 DIN。所以说话必须另买一颗按键，接到 GPIO0。</div>
+      <p>对话模式里：GND 接蓝轨，SIG 接主板 0。现在还没有电池，要先用 USB 供电。配好网并检查钥匙以后，网页里点「开始听」；真机上才按这颗键。听完它会写下短回答，并用电脑喇叭出声。</p>
+      ${around("btn")}<h3>每一根针是什么</h3>${pinCards("btn")}`;
+  },
   wires() {
     return `<p class="kb-lead">杜邦线就是小机器人的神经。颜色是给小朋友看的暗号，不是电线自己带电。</p>
       <div class="kb-palette">
@@ -244,6 +262,8 @@ const PAGES = {
   faq() {
     return `<div class="kb-faq">
       <details open><summary>Desk Buddy 会走路吗？</summary><p>不会。它是插在电脑旁边的桌面小宠物，负责眨眼、听话、说话，不会走路也不会转头。</p></details>
+      <details><summary>说话键是 RST 还是 BOOT？</summary><p>都不是。RST 会整机重启。BOOT 在这块 ESP32-C3 上连着 GPIO9，而 GPIO9 已经接去功放。请另买 12×12mm 带帽轻触按键，接到 GPIO0。点工具栏「对话」可以看到这颗键。</p></details>
+      <details><summary>对话模式什么时候可以开始听？</summary><p>现在没有电池，要先用 USB 供电。请先点「手机连上热点」，再打开 192.168.4.1，填写家里的 Wi-Fi 和 MiniMax API key。空格子不能保存。配上网后，老师电脑上的教师台才能检查钥匙；学生页不会把钥匙发到网上。钥匙通过后，教师台可以点「开始听」，对着电脑麦克风说话，说完再点「说完了」。听完它会写下短回答，并用电脑喇叭出声。学生页不会把声音发到网上。点「忘记网络」会回到热点画面。</p></details>
       <details><summary>为什么红轨插上零件还不亮？</summary><p>红轨自己不会发电。先把主板的 3.3 接到红轨、G 接到蓝轨，再让屏幕去红蓝轨上吃饭、回家。</p></details>
       <details><summary>左右两边的红轨是通的吗？</summary><p>不通。左边和右边是两家人。已经接好时，会用一根红线把两边红轨连起来，再用一根黑线把两边蓝轨连起来。</p></details>
       <details><summary>被零件挡住的孔为什么点不了？</summary><p>针已经占满板子下面的空间，杜邦线挤不进去。请点旁边同一组还空着的孔，电在板子里面是通的。</p></details>
@@ -329,12 +349,14 @@ class MiniViewer {
     const start = -((ids.length - 1) * gap) / 2;
     const loaded = await Promise.all(
       ids.map(async (id, i) => {
+        if (MODELS[id] == null) return { id, i, scene: null };
         const data = await this.loader.loadAsync(`./assets/part${MODELS[id]}.glb`);
         return { id, i, scene: data.scene };
       }),
     );
     if (!this.alive || gen !== this.gen) return;
     for (const { id, i, scene: model } of loaded) {
+      if (!model) continue;
       model.traverse((o) => {
         if (id === "speaker" && /wire|dupont|contact window|socket opening/i.test(o.name || "")) {
           o.visible = false;
@@ -393,7 +415,8 @@ const PROFILES = {
   oled: ["眼睛", "0.96 寸 OLED", "128 × 64 个小亮点，拼出眨眼、文字和爱心。你写什么，它就努力画出来。", "#dcecf5"],
   amp: ["声音帮手", "MAX98357A 功放", "大脑送来的声音信号还推不动喇叭。它来搭把手，让喇叭真正响起来。", "#eee1f2"],
   mic: ["耳朵", "MSM3526 麦克风", "把拍手和说话变成大脑能读懂的声音数据。它负责听，喇叭负责说。", "#f5edcf"],
-  speaker: ["嘴巴", "8Ω 小喇叭", "里面的小薄片来回振动，推动空气，我们就听到了声音。它要和功放一起工作。", "#e4e8ec"]
+  speaker: ["嘴巴", "8Ω 小喇叭", "里面的小薄片来回振动，推动空气，我们就听到了声音。它要和功放一起工作。", "#e4e8ec"],
+  btn: ["说话键", "12×12mm 轻触按键", "按下才通，松开弹回。接到 GPIO0。不是 RST，也不是 BOOT。", "#f3ddd0"]
 };
 function pinsFor(id) {
   return definitions.find(d => d.id === id).pins.map(([name]) => {

@@ -5,7 +5,8 @@ export const definitions=[
  {id:'esp',name:'ESP32-C3',detail:'SuperMini 主控',color:'#253139',model:1,pos:[-26,10],pins:[...['5V','G','3.3','4','3','2','1','0'].map((n,i)=>[n,7.62,8.89-i*2.54]),...['5','6','7','8','9','10','20','21'].map((n,i)=>[n,-7.62,8.89-i*2.54])]},
  {id:'amp',name:'MAX98357A',detail:'功放 · tone() 走电脑喇叭',color:'#982972',model:2,pos:[-26,-28],pins:[...['LRC','BCLK','DIN','GAIN','SD','GND','Vin'].map((n,i)=>[n,(i-3)*2.54,-8.35]),['-',-2.05,10],['+',2.05,10]]},
  {id:'mic',name:'MSM3526',detail:'麦克风 · analogRead() 走电脑麦克风',color:'#d1a60b',model:3,pos:[0,-26],pins:[...['L/R','WS','SCK'].map((n,i)=>[n,-4.4,-2.54+i*2.54]),...['GND','VDD','SD'].map((n,i)=>[n,4.4,-2.54+i*2.54])]},
- {id:'speaker',name:'喇叭',detail:'8Ω 0.5W · 虚拟运行走电脑喇叭',color:'#606b73',model:4,pos:[33,-24],pins:[['-',20,20],['+',23,20]]}
+ {id:'speaker',name:'喇叭',detail:'8Ω 0.5W · 虚拟运行走电脑喇叭',color:'#606b73',model:4,pos:[33,-24],pins:[['-',20,20],['+',23,20]]},
+ {id:'btn',name:'说话按键',detail:'12×12mm 轻触按键 · 按下才通',color:'#c45c26',model:-1,pos:[18,-8],pins:[['GND',-2.54,0],['SIG',2.54,0]]}
 ];
 export const pinIds=new Set(definitions.flatMap(d=>d.pins.map(p=>d.id+':'+p[0])));
 
@@ -77,6 +78,30 @@ export const lessons = [
       return check.ready && active.includes('mic');
     }
   }
+];
+
+export const COMPANION_PARTS = ['esp', 'oled', 'amp', 'mic', 'speaker', 'btn'];
+export const COMPANION_WIRING = [
+  ['esp:G', 'rail:R-'],
+  ['esp:3.3', 'rail:R+'],
+  ['oled:GND', 'rail:R-'],
+  ['oled:VCC', 'rail:R+'],
+  ['oled:SCL', 'esp:4'],
+  ['oled:SDA', 'esp:5'],
+  ['amp:GND', 'rail:L-'],
+  ['amp:Vin', 'rail:L+'],
+  ['amp:LRC', 'esp:7'],
+  ['amp:BCLK', 'esp:8'],
+  ['amp:DIN', 'esp:9'],
+  ['mic:GND', 'rail:R-'],
+  ['mic:VDD', 'rail:R+'],
+  ['mic:WS', 'esp:20'],
+  ['mic:SCK', 'esp:21'],
+  ['mic:SD', 'esp:10'],
+  ['btn:GND', 'rail:R-'],
+  ['btn:SIG', 'esp:0'],
+  ['rail:L-', 'rail:R-'],
+  ['rail:L+', 'rail:R+'],
 ];
 
 // 兼容旧代码
@@ -258,4 +283,4 @@ export function getLessonProgress(lessonId, net, active) {
   };
 }
 
-export function validateProject(p){if(!p||p.version!==1||typeof p.code!=='string'||p.code.length>50000||!Array.isArray(p.parts)||!Array.isArray(p.wires)||p.wires.length>80||p.parts.length>5)throw Error('作品格式不正确或内容过大');let ids=new Set();for(const d of p.parts){if(!definitions.some(x=>x.id===d.id)||ids.has(d.id)||!Array.isArray(d.pos)||d.pos.length!==2||!d.pos.every(n=>Number.isFinite(n)&&Math.abs(n)<150)||!Number.isFinite(d.rotation)||Math.abs(d.rotation)>100||typeof d.flipped!=='boolean')throw Error('零件数据不正确');ids.add(d.id);}for(const w of p.wires){if(!pinIds.has(w.a)||!pinIds.has(w.b)||w.a===w.b||![w.a,w.b].every(x=>ids.has(x.split(':')[0])))throw Error('接线数据不正确');}return p;}
+export function validateProject(p){if(!p||p.version!==1||typeof p.code!=='string'||p.code.length>50000||!Array.isArray(p.parts)||!Array.isArray(p.wires)||p.wires.length>80||p.parts.length>6)throw Error('作品格式不正确或内容过大');let ids=new Set();for(const d of p.parts){if(!definitions.some(x=>x.id===d.id)||ids.has(d.id)||!Array.isArray(d.pos)||d.pos.length!==2||!d.pos.every(n=>Number.isFinite(n)&&Math.abs(n)<150)||!Number.isFinite(d.rotation)||Math.abs(d.rotation)>100||typeof d.flipped!=='boolean')throw Error('零件数据不正确');ids.add(d.id);}for(const w of p.wires){if(!pinIds.has(w.a)||!pinIds.has(w.b)||w.a===w.b||![w.a,w.b].every(x=>ids.has(x.split(':')[0])))throw Error('接线数据不正确');}return p;}
