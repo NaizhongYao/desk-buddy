@@ -265,7 +265,7 @@ const PAGES = {
       <details><summary>说话键是 RST 还是 BOOT？</summary><p>都不是。RST 会整机重启。BOOT 在这块 ESP32-C3 上连着 GPIO9，而 GPIO9 已经接去功放。请另买 12×12mm 带帽轻触按键，接到 GPIO0。点工具栏「对话」可以看到这颗键。</p></details>
       <details><summary>对话模式什么时候可以开始听？</summary><p>现在没有电池，要先用 USB 供电。请先点「手机连上热点」，再打开 192.168.4.1，填写家里的 Wi-Fi 和 MiniMax API key。空格子不能保存。配上网后请点「检查钥匙」。学生页只是练习，不会把钥匙发到网上；真的 MiniMax 检查请到老师电脑。钥匙通过后可以点「开始听」：教师台会对着电脑麦克风说话，听完写下短回答并出声。学生页会假装听、想、说，让你看屏幕的脸。听的时候屏幕睁眼，想的时候眯眼，说的时候张嘴。失败时小屏幕会写出 NET BAD、NO QUOTA、TOO FAST 这类英文，中文说明看弹出的提示。点「忘记网络」会回到热点画面。</p></details>
       <details><summary>屏幕上的 KEY BAD、NO QUOTA、NET BAD 是什么？</summary><p>这是失败暗号。KEY BAD：钥匙不对，请让大人再填。NO QUOTA：钥匙对了但没额度。NET BAD：老师电脑连不上 MiniMax。TOO FAST：问得太密。TOO LONG：说得太长。MIC BAD：声音 MiniMax 听不懂。BUSY NOW：MiniMax 暂时没空。中文说明会出现在屏幕下方的提示里。</p></details>
-      <details><summary>真机怎么配网和说话？</summary><p>老师在对话模式连接板子，再点「烧录对话固件」。板子重启后屏幕写热点名，例如 DeskBuddy-A3F2。手机连上这个 Wi-Fi，打开 192.168.4.1，填家里的网和 MiniMax key。配好后短按说话键开始听，长按大约 4 秒会忘记网络。真机喇叭走功放 I2S，麦克风走零件上的麦克风，不走电脑。</p></details>
+      <details><summary>真机怎么配网和说话？</summary><p>老师在对话模式连接板子，再点「烧录对话固件」。板子重启后屏幕写热点名，例如 DeskBuddy-A3F2C1。名字用芯片 MAC 后 6 位，同一块板子每次都一样。手机连上这个 Wi-Fi，打开 192.168.4.1，填家里的网和 MiniMax key。配好后短按说话键开始听，长按大约 4 秒会忘记网络。真机喇叭走功放 I2S，麦克风走零件上的麦克风，不走电脑。</p></details>
       <details><summary>为什么红轨插上零件还不亮？</summary><p>红轨自己不会发电。先把主板的 3.3 接到红轨、G 接到蓝轨，再让屏幕去红蓝轨上吃饭、回家。</p></details>
       <details><summary>左右两边的红轨是通的吗？</summary><p>不通。左边和右边是两家人。已经接好时，会用一根红线把两边红轨连起来，再用一根黑线把两边蓝轨连起来。</p></details>
       <details><summary>被零件挡住的孔为什么点不了？</summary><p>针已经占满板子下面的空间，杜邦线挤不进去。请点旁边同一组还空着的孔，电在板子里面是通的。</p></details>

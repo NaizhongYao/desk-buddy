@@ -5,6 +5,8 @@ const src = readFileSync(new URL('./dist/firmware/desk-buddy-talk.ino', import.m
 
 assert.ok(src.includes('192.168.4.1'), 'captive portal address');
 assert.ok(src.includes('DeskBuddy-'), 'SoftAP name prefix');
+assert.match(src, /ESP\.getEfuseMac\(\)\s*&\s*0xFFFFFF/, 'SoftAP uses MAC lower 24 bits');
+assert.match(src, /DeskBuddy-%06X/, 'SoftAP name is 6 hex digits');
 assert.ok(src.includes('/v1/speech_to_text'), 'ASR path');
 assert.ok(src.includes('/v1/chat/completions'), 'chat path');
 assert.ok(src.includes('/v1/t2a_v2'), 'TTS path');

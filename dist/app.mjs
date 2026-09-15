@@ -1,5 +1,5 @@
 import {holes,holeMap,boardEdges,occupied,footprint,defaults,validPlacement,coveredHoles,freeOnNet,autoWires,placement} from './breadboard.mjs';
-import {compile,execute} from './runtime.mjs';import {examples,virtualSketch} from './examples.mjs';import {definitions,lessons,COMPANION_PARTS,COMPANION_WIRING,connected as graphConnected,checkCircuit as graphCheck,getLessonProgress,checkWire,diagnoseWrongWire,pinLabel,validateProject as oldValidate,keepWiresFromPreviousLessons,wireTouchesPart} from './circuit.mjs';import {Display} from './display.mjs';import {createTable} from './board-scene.mjs?v=20260915-2';import {initGuide} from './knowledge.mjs?v=20260915-2';
+import {compile,execute} from './runtime.mjs';import {examples,virtualSketch} from './examples.mjs';import {definitions,lessons,COMPANION_PARTS,COMPANION_WIRING,connected as graphConnected,checkCircuit as graphCheck,getLessonProgress,checkWire,diagnoseWrongWire,pinLabel,validateProject as oldValidate,keepWiresFromPreviousLessons,wireTouchesPart} from './circuit.mjs';import {Display} from './display.mjs';import {createTable} from './board-scene.mjs?v=20260915-4';import {initGuide} from './knowledge.mjs?v=20260915-3';
 import {analyze,defaultProgram,recipe,validateProgram,listUnits} from './blocks.mjs?v=20260912-19';
 import {executeBlocks,generateSketch} from './blocks-gen.mjs?v=20260912-19';
 import {mountBlocks} from './blocks-ui.mjs?v=20260912-19';
@@ -27,13 +27,13 @@ let isConnected=false;
 function robotHotspotName(){
   try{
     let id=localStorage.getItem(HOTSPOT_KEY);
-    if(!/^[0-9A-F]{4}$/.test(id||'')){
-      id=Array.from({length:4},()=>'0123456789ABCDEF'[Math.floor(Math.random()*16)]).join('');
+    if(!/^[0-9A-F]{6}$/.test(id||'')){
+      id=Array.from({length:6},()=>'0123456789ABCDEF'[Math.floor(Math.random()*16)]).join('');
       localStorage.setItem(HOTSPOT_KEY,id);
     }
     return 'DeskBuddy-'+id;
   }catch{
-    return 'DeskBuddy-A3F2';
+    return 'DeskBuddy-A3F2C1';
   }
 }
 function escapeHtml(s){
@@ -202,10 +202,53 @@ function selectedPart(id){
   if(id) table?.setSelectedWire(null);
 }
 function wiringFrozen(){return wiringMode!=='custom';}
+let xrayOn=false;
+function distToSegment(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay;
+  const len=dx*dx+dy*dy;
+  if(len<1e-6) return Math.hypot(px-ax,py-ay);
+  let t=((px-ax)*dx+(py-ay)*dy)/len;
+  t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));
+}
+function holeCoveredByWires(id){
+  const h=holeMap.get(id);
+  if(!h) return false;
+  for(const w of wires){
+    if(w.a===id||w.b===id) continue;
+    const a=holeMap.get(w.a),b=holeMap.get(w.b);
+    if(!a||!b) continue;
+    if(distToSegment(h.x,h.y,a.x,a.y,b.x,b.y)<2.6) return true;
+  }
+  return false;
+}
+function taskHolesCoveredByWires(taskIds){
+  if(xrayOn||wiringFrozen()||!taskIds?.length) return false;
+  return taskIds.some(holeCoveredByWires);
+}
+function setXrayOn(on){
+  xrayOn=!!on;
+  try{table?.setXray(xrayOn);}catch(err){console.error(err);toast('透视没有完全打开，请再点一次。');}
+  const btn=$('xray');
+  if(btn){
+    btn.setAttribute('aria-pressed',String(xrayOn));
+    btn.classList.toggle('active',xrayOn);
+    if(xrayOn) btn.classList.remove('need-xray');
+  }
+  if($('scenehint')) $('scenehint').textContent=sceneHint();
+  updateGuide();
+}
+let viewMode='top';
 function sceneHint(){
+  const extra=xrayOn?' · X-ray 已打开，电线变淡了':'';
+  if(viewMode!=='top'){
+    return wiringFrozen()
+      ?'3D 是用来看的 · 接线请切回「俯视接线」 · 右键旋转 · 滚轮缩放'+extra
+      :'3D 是用来看的 · 接线请切回「俯视接线」 · 右键旋转 · 滚轮缩放'+extra;
+  }
   return wiringFrozen()
-    ?'零件和电线已经固定 · 点空白处拖动平移 · Shift+滚轮也可平移 · 滚轮缩放 · 右键旋转'
-    :'点空孔接线 · 点电线可选中后删除 · 点空白处拖动平移 · Shift+滚轮也可平移 · 滚轮缩放 · 右键旋转';
+    ?'零件和电线已经固定 · 点空白处拖动平移 · Shift+滚轮也可平移 · 滚轮缩放 · 右键旋转'+extra
+    :'点空孔接线 · 点电线可选中后删除 · 点空白处拖动平移 · Shift+滚轮也可平移 · 滚轮缩放 · 右键旋转'+extra;
 }
 function copyWires(list){return (list||[]).map(w=>({a:w.a,b:w.b}));}
 function sameWires(a,b){
@@ -414,6 +457,7 @@ function updateGuide(){
     $('steps').replaceChildren();
     $('lesson-errors').replaceChildren();
     table.highlight([],null,[]);
+    $('xray')?.classList.remove('need-xray');
   }else if(wiringMode==='ready'){
     const tag=$('guide-toggle')?.querySelector('.tag');
     if(tag) tag.textContent='接线指导';
@@ -422,6 +466,7 @@ function updateGuide(){
     $('steps').replaceChildren();
     $('lesson-errors').replaceChildren();
     table.highlight([],null,[]);
+    $('xray')?.classList.remove('need-xray');
   }else{
     const tag=$('guide-toggle')?.querySelector('.tag');
     if(tag) tag.textContent='接线指导';
@@ -463,6 +508,13 @@ function updateGuide(){
       $('step-title').textContent=`${done} / ${total} · ${prefix}${spec[2]}`;
       $('step-text').textContent=(prevMissing&&currentLesson>1?'上一课的线还要通着。 ':'')+stepHint(spec);
     }
+    const blocked=!!spec&&taskHolesCoveredByWires(taskIds);
+    $('xray')?.classList.toggle('need-xray',blocked);
+    if(blocked){
+      const hint=$('step-text');
+      if(hint) hint.textContent+=' 金黄的孔可能被电线挡住了。请点右上角「X-ray 透视」，电线会变淡，孔就看得见了。';
+    }
+    if($('scenehint')) $('scenehint').textContent=sceneHint();
     $('lesson-errors').replaceChildren();
     if(msgs.length){
       const errorBox=document.createElement('div');
@@ -1311,7 +1363,7 @@ $('load-block-example').onclick=()=>{
   refreshBlocksCode();
   updateHistoryButtons();
 };
-$('run').onclick=run;$('stop').onclick=()=>stop();$('clearlog').onclick=()=>{logs=[];$('log').textContent='';};$('help').onclick=()=>$('helpdialog').showModal();$('top').onclick=()=>{table?.setMode('top');$('top').classList.add('active');$('three').classList.remove('active');$('scenehint').textContent=sceneHint();};$('xray').onclick=()=>{const on=$('xray').getAttribute('aria-pressed')!=='true';$('xray').setAttribute('aria-pressed',String(on));table?.setXray(on);$('xray').classList.toggle('active',on);};$('three').onclick=()=>{table?.setMode('three');$('three').classList.add('active');$('top').classList.remove('active');$('scenehint').textContent=sceneHint();};$('resetview').onclick=()=>{table?.center();showZoom();};$('zoom-in').onclick=()=>table?.zoomBy(1.2);$('zoom-out').onclick=()=>table?.zoomBy(1/1.2);$('zoom-reset').onclick=()=>table?.zoomTo(1);$('mode-custom').onclick=()=>setWiringMode('custom');$('mode-ready').onclick=()=>setWiringMode('ready');$('mode-talk')?.addEventListener('click',()=>setWiringMode('talk'));
+$('run').onclick=run;$('stop').onclick=()=>stop();$('clearlog').onclick=()=>{logs=[];$('log').textContent='';};$('help').onclick=()=>$('helpdialog').showModal();$('top').onclick=()=>{viewMode='top';table?.setMode('top');$('top').classList.add('active');$('three').classList.remove('active');$('scenehint').textContent=sceneHint();};$('xray').onclick=()=>setXrayOn($('xray').getAttribute('aria-pressed')!=='true');$('three').onclick=()=>{viewMode='three';table?.setMode('three');$('three').classList.add('active');$('top').classList.remove('active');$('scenehint').textContent=sceneHint();};$('resetview').onclick=()=>{table?.center();showZoom();};$('zoom-in').onclick=()=>table?.zoomBy(1.2);$('zoom-out').onclick=()=>table?.zoomBy(1/1.2);$('zoom-reset').onclick=()=>table?.zoomTo(1);$('mode-custom').onclick=()=>setWiringMode('custom');$('mode-ready').onclick=()=>setWiringMode('ready');$('mode-talk')?.addEventListener('click',()=>setWiringMode('talk'));
 $('talk-join')?.addEventListener('click',joinHotspot);
 $('talk-open')?.addEventListener('click',openPhone);
 $('talk-check')?.addEventListener('click',checkMiniMaxKey);

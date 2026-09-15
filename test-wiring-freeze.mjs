@@ -9,6 +9,11 @@ const scene = readFileSync(join(root, 'board-scene.mjs'), 'utf8');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 
 assert.match(app, /function wiringFrozen\(\)\{return wiringMode!=='custom';\}/);
+assert.match(app, /function holeCoveredByWires\(/);
+assert.match(app, /金黄的孔可能被电线挡住了/);
+assert.match(app, /function setXrayOn\(/);
+assert.match(app, /3D 是用来看的/);
+assert.match(scene, /接线请点左上角「俯视接线」/);
 assert.match(app, /table\.highlight\(taskIds,pending,netIds\)/);
 assert.match(app, /if\(wiringFrozen\(\)\) return;\s*if\(!holeMap\.has\(id\)\)return;/);
 assert.match(app, /table\.setFrozen\(mode!=='custom'\)/);
@@ -24,12 +29,12 @@ assert.match(scene, /setFrozen\(on\)/);
 assert.match(scene, /0xf0b429/);
 assert.match(scene, /task \? 1\.22 : net \? 1\.06/);
 assert.match(scene, /if \(frozen\) \{\s*panning = \{ x: e\.clientX, y: e\.clientY \}/);
-assert.match(scene, /const h = mode === "top" \? nearest\(p\) : null;/);
+assert.match(scene, /const h = nearest\(p\);/);
 assert.doesNotMatch(scene, /let drag = null/);
 assert.doesNotMatch(scene, /drag = \{ id: selected/);
 assert.doesNotMatch(scene, /callbacks\.change\(\)/);
 
-assert.match(html, /app\.mjs\?v=20260915-2/);
+assert.match(html, /app\.mjs\?v=20260915-5/);
 assert.match(html, /零件位置是写死的，不能拖/);
 assert.match(html, /金黄灯是这一步要接的两个孔/);
 assert.doesNotMatch(html, /左键拖零件/);

@@ -41,7 +41,7 @@ assert.equal(asciiLabel('SchoolNet'), 'SchoolNet');
 assert.equal(asciiLabel('家里的网'), 'HOME WIFI');
 
 const d = new Display();
-d.paintHotspot('DeskBuddy-A3F2');
+d.paintHotspot('DeskBuddy-A3F2C1');
 assert.ok(d.pixels.some((v) => v === 1), '热点画面应画出文字');
 d.paintConnecting();
 assert.ok(d.pixels.some((v) => v === 1), '连接中画面应画出文字');

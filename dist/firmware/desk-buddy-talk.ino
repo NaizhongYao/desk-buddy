@@ -456,9 +456,9 @@ void setup() {
   pinMode(PIN_BTN, INPUT_PULLUP);
   Wire.begin(PIN_SDA, PIN_SCL);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  uint16_t id = (uint16_t)(ESP.getEfuseMac() & 0xFFFF);
-  char name[20];
-  snprintf(name, sizeof(name), "DeskBuddy-%04X", id);
+  uint32_t id = (uint32_t)(ESP.getEfuseMac() & 0xFFFFFF);
+  char name[24];
+  snprintf(name, sizeof(name), "DeskBuddy-%06X", id);
   apName = name;
   prefs.begin("buddy", false);
   wifiSsid = prefs.getString("ssid", "");

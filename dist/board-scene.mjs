@@ -257,6 +257,7 @@ export async function createTable(container, screenCanvas, callbacks) {
     );
     plate.position.set(0, 0, 1.72);
     plate.renderOrder = 2;
+    plate.name = "esp-pin-labels";
     plate.userData.part = "esp";
     g.add(plate);
   }
@@ -436,6 +437,52 @@ export async function createTable(container, screenCanvas, callbacks) {
         cable(mouth, inside, 0xc49a4a, mountObjects, 0, 0.28);
       }
     }
+    
+    applyXray();
+  }
+
+  function ghostMaterial(mat, on, ghostOpacity) {
+    if (!mat) return;
+    const list = Array.isArray(mat) ? mat : [mat];
+    for (const m of list) {
+      if (!m) continue;
+      if (!m.userData) m.userData = {};
+      if (!m.userData.xrayOrig) {
+        m.userData.xrayOrig = {
+          transparent: !!m.transparent,
+          opacity: Number.isFinite(m.opacity) ? m.opacity : 1,
+          depthWrite: m.depthWrite !== false,
+        };
+      }
+      const orig = m.userData.xrayOrig;
+      if (on) {
+        m.transparent = true;
+        m.opacity = Math.min(orig.opacity, ghostOpacity);
+        m.depthWrite = false;
+      } else {
+        m.transparent = orig.transparent;
+        m.opacity = orig.opacity;
+        m.depthWrite = orig.depthWrite;
+      }
+      m.needsUpdate = true;
+    }
+  }
+
+  function applyXray() {
+    traces.visible = xray;
+    ghostMaterial(body.material, xray, 0.22);
+    for (const g of roots.values()) {
+      g.traverse((o) => {
+        if (o.name === "esp-pin-labels") {
+          o.visible = !xray;
+          return;
+        }
+        if (o.isMesh) ghostMaterial(o.material, xray, 0.22);
+      });
+    }
+    for (const mesh of [...wireObjects, ...mountObjects, ...previewWire]) {
+      if (mesh?.isMesh) ghostMaterial(mesh.material, xray, 0.15);
+    }
   }
 
   function install(p) {
@@ -554,8 +601,16 @@ export async function createTable(container, screenCanvas, callbacks) {
       return;
     }
     const p = point(e);
-    const h = mode === "top" ? nearest(p) : null;
+    const h = nearest(p);
     if (h) {
+      if (mode !== "top") {
+        if (!frozen) callbacks.message?.("3D 是用来看的。接线请点左上角「俯视接线」。");
+        else {
+          panning = { x: e.clientX, y: e.clientY };
+          capture(renderer.domElement, e.pointerId);
+        }
+        return;
+      }
       selected = null;
       callbacks.select(null);
       callbacks.pin(h.id);
@@ -615,17 +670,19 @@ export async function createTable(container, screenCanvas, callbacks) {
     const p = point(e);
     const h = nearest(p);
     if (h) {
-      const owner = [...parts.values()].flatMap((part) => footprint(part.id, part.row)).find((v) => v.b === h.id);
-      const blocked = coveredHoles(state()).has(h.id) && !owner;
-      info.textContent =
-        h.id.slice(3) +
-        (owner ? " · " + owner.a : blocked ? " · 被零件挡住，接不了线" : " · " + (occupied(state(), wires).has(h.id) ? "已插线" : "空孔")) +
-        " · " +
-        (h.net.includes("+") || h.net.includes("-")
-          ? "同侧同色轨相通"
-          : "同一行 " + (h.net[0] === "L" ? "a–e" : "f–j") + " 相通");
-    } else if (mode === "three") {
-      info.textContent = "3D 模式：切到俯视可看孔信息";
+      if (mode !== "top") {
+        info.textContent = "3D 是用来看的 · 接线请切回「俯视接线」";
+      } else {
+        const owner = [...parts.values()].flatMap((part) => footprint(part.id, part.row)).find((v) => v.b === h.id);
+        const blocked = coveredHoles(state()).has(h.id) && !owner;
+        info.textContent =
+          h.id.slice(3) +
+          (owner ? " · " + owner.a : blocked ? " · 被零件挡住，接不了线" : " · " + (occupied(state(), wires).has(h.id) ? "已插线" : "空孔")) +
+          " · " +
+          (h.net.includes("+") || h.net.includes("-")
+            ? "同侧同色轨相通"
+            : "同一行 " + (h.net[0] === "L" ? "a–e" : "f–j") + " 相通");
+      }
     } else {
       info.textContent = "";
     }
@@ -805,19 +862,8 @@ export async function createTable(container, screenCanvas, callbacks) {
       rebuild();
     },
     setXray(on) {
-      xray = on;
-      traces.visible = on;
-      body.material.transparent = on;
-      body.material.opacity = on ? 0.22 : 1;
-      for (const g of roots.values()) {
-        g.traverse((o) => {
-          if (o.isMesh) {
-            o.material.transparent = on;
-            o.material.opacity = on ? 0.22 : 1;
-            o.material.depthWrite = !on;
-          }
-        });
-      }
+      xray = !!on;
+      applyXray();
     },
     led(on) {
       const g = roots.get("esp");

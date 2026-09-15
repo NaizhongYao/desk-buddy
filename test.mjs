@@ -51,7 +51,7 @@ assert.ok(newWiresForLesson(3).every(w=>w[0].startsWith('mic:')));
 assert.deepEqual(COMPANION_PARTS,['esp','oled','amp','mic','speaker','btn']);
 assert.ok(footprint('btn',16).some(e=>e.a==='btn:SIG'&&e.b==='bb:f16'));
 const d=new Display();d.circle(40,32,14,1,true);assert.equal(d.pixels[32*128+40],1);assert.equal(d.pixels[0],0);
-d.paintHotspot('DeskBuddy-A3F2');
+d.paintHotspot('DeskBuddy-A3F2C1');
 assert.ok(d.pixels.some(v=>v===1),'热点画面应画出文字');
 const controller=new AbortController(),calls=[];
 try{await execute(compile('void setup(){}void loop(){for(int x=0;x<3;x++){Serial.println(x);}delay(1);}'),{call(n,a){calls.push([n,...a]);if(calls.length===3)controller.abort();}},controller.signal);}catch(e){assert.equal(e.message,'STOPPED');}
