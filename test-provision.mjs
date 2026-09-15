@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Display } from './dist/display.mjs';
-import { validatePortal, emptyProvision, loadProvision, saveProvision, clearProvision, isOnline, canListen, asciiLabel, classifyKeyHealth, classifyAsr, asciiHeard, classifyChat, extractChatText, extractTtsHex, classifyTts } from './dist/provision.mjs';
+import { validatePortal, emptyProvision, loadProvision, saveProvision, clearProvision, isOnline, canListen, asciiLabel, classifyKeyHealth, classifyAsr, asciiHeard, classifyChat, extractChatText, extractTtsHex, classifyTts, oledFailLines } from './dist/provision.mjs';
 
 function mem() {
   const m = new Map();
@@ -55,10 +55,13 @@ d.paintKeyOk();
 assert.ok(d.pixels.some((v) => v === 1), '钥匙通过画面应画出文字');
 d.paintKeyBad();
 assert.ok(d.pixels.some((v) => v === 1), '钥匙失败画面应画出文字');
+const lit = (x, y) => d.pixels[y * 128 + x] === 1;
 d.paintListening();
-assert.ok(d.pixels.some((v) => v === 1), '正在听画面应画出文字');
+assert.equal(lit(40, 16), true, '听：眼圈应亮');
+assert.equal(lit(43, 28), false, '听：瞳孔应挖空');
+assert.equal(lit(64, 51), true, '听：小嘴应亮');
 d.paintListenWait();
-assert.ok(d.pixels.some((v) => v === 1), '听写中画面应画出文字');
+assert.equal(lit(40, 16), true, '听写中也是听的脸');
 d.paintHeard('hello buddy');
 assert.ok(d.pixels.some((v) => v === 1), '听见画面应画出文字');
 d.paintHeard('你好');
@@ -68,17 +71,32 @@ assert.ok(d.pixels.some((v) => v === 1), '没听清画面应画出文字');
 d.paintListenBad();
 assert.ok(d.pixels.some((v) => v === 1), '听写失败画面应画出文字');
 d.paintThinking();
-assert.ok(d.pixels.some((v) => v === 1), '正在想画面应画出文字');
+assert.equal(lit(40, 26), true, '想：眯眼应盖住眼睛中心');
+assert.equal(lit(40, 16), false, '想：不应再画大眼圈');
+assert.equal(lit(64, 50), false, '想：思考圈中心应空');
+assert.equal(lit(64, 45), true, '想：思考圈边应亮');
 d.paintReply('hello buddy');
-assert.ok(d.pixels.some((v) => v === 1), '回答画面应画出文字');
+assert.equal(lit(40, 16), true, '说完后回到微笑脸');
 d.paintReply('你好');
-assert.ok(d.pixels.some((v) => v === 1), '中文回答应回退成英文字');
+assert.equal(lit(40, 16), true, '中文回答也回到微笑脸');
 d.paintReplyBad();
 assert.ok(d.pixels.some((v) => v === 1), '回答失败画面应画出文字');
 d.paintSpeaking();
-assert.ok(d.pixels.some((v) => v === 1), '正在说画面应画出文字');
+assert.equal(lit(64, 50), false, '说：张嘴中心应空');
+assert.equal(lit(64, 41), true, '说：张嘴外圈应亮');
+assert.equal(lit(40, 16), true, '说：眼睛应睁开');
 d.paintSpeakBad();
 assert.ok(d.pixels.some((v) => v === 1), '出声失败画面应画出文字');
+d.paintListenBad('quota');
+assert.ok(d.pixels.some((v) => v === 1), '额度失败画面应画出文字');
+d.paintKeyBad('network');
+assert.ok(d.pixels.some((v) => v === 1), '网络失败画面应画出文字');
+assert.deepEqual(oledFailLines('listen', 'quota'), ['NO QUOTA', 'ASK ADULT']);
+assert.deepEqual(oledFailLines('key', 'auth'), ['KEY BAD', 'RETRY KEY']);
+assert.deepEqual(oledFailLines('listen', 'network'), ['NET BAD', 'CHECK WIFI', 'RETRY']);
+assert.deepEqual(oledFailLines('speak', 'rate'), ['TOO FAST', 'WAIT']);
+assert.deepEqual(oledFailLines('listen', 'empty'), ['DIDNT HEAR', 'TRY AGAIN']);
+assert.deepEqual(oledFailLines('reply', 'empty'), ['NO TEXT', 'TRY AGAIN']);
 
 assert.equal(classifyKeyHealth({ httpStatus: 200, body: { id: 'chat-1', choices: [{}] } }).ok, true);
 assert.equal(classifyKeyHealth({ httpStatus: 200, body: { base_resp: { status_code: 0 } } }).ok, true);
@@ -130,4 +148,4 @@ assert.equal(classifyTts({ httpStatus: 200, body: { base_resp: { status_code: 10
 assert.equal(classifyTts({ httpStatus: 503, body: {} }).code, 'server');
 assert.equal(classifyTts({ networkError: true }).code, 'network');
 
-console.log('PASS: provision ritual, empty fields, forget network, OLED states, key health, asr classify, chat classify, tts classify');
+console.log('PASS: provision ritual, empty fields, forget network, OLED states, key health, asr classify, chat classify, tts classify, talk faces');

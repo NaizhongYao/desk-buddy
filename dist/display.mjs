@@ -1,3 +1,4 @@
+import { oledFailLines } from './provision.mjs';
 // Deterministic monochrome framebuffer with a small 5x7 ASCII font.
 const FONT={A:['01110','10001','10001','11111','10001','10001','10001'],B:['11110','10001','10001','11110','10001','10001','11110'],C:['01111','10000','10000','10000','10000','10000','01111'],D:['11110','10001','10001','10001','10001','10001','11110'],E:['11111','10000','10000','11110','10000','10000','11111'],F:['11111','10000','10000','11110','10000','10000','10000'],G:['01111','10000','10000','10111','10001','10001','01111'],H:['10001','10001','10001','11111','10001','10001','10001'],I:['111','010','010','010','010','010','111'],J:['00111','00010','00010','00010','10010','10010','01100'],K:['10001','10010','10100','11000','10100','10010','10001'],L:['10000','10000','10000','10000','10000','10000','11111'],M:['10001','11011','10101','10101','10001','10001','10001'],N:['10001','11001','10101','10011','10001','10001','10001'],O:['01110','10001','10001','10001','10001','10001','01110'],P:['11110','10001','10001','11110','10000','10000','10000'],Q:['01110','10001','10001','10001','10101','10010','01101'],R:['11110','10001','10001','11110','10100','10010','10001'],S:['01111','10000','10000','01110','00001','00001','11110'],T:['11111','00100','00100','00100','00100','00100','00100'],U:['10001','10001','10001','10001','10001','10001','01110'],V:['10001','10001','10001','10001','10001','01010','00100'],W:['10001','10001','10001','10101','10101','11011','10001'],X:['10001','10001','01010','00100','01010','10001','10001'],Y:['10001','10001','01010','00100','00100','00100','00100'],Z:['11111','00001','00010','00100','01000','10000','11111'],'0':['01110','10001','10011','10101','11001','10001','01110'],'1':['00100','01100','00100','00100','00100','00100','01110'],'2':['01110','10001','00001','00010','00100','01000','11111'],'3':['11110','00001','00001','01110','00001','00001','11110'],'4':['00010','00110','01010','10010','11111','00010','00010'],'5':['11111','10000','10000','11110','00001','00001','11110'],'6':['01110','10000','10000','11110','10001','10001','01110'],'7':['11111','00001','00010','00100','01000','01000','01000'],'8':['01110','10001','10001','01110','10001','10001','01110'],'9':['01110','10001','10001','01111','00001','00001','01110'],'!':['1','1','1','1','1','0','1'],'?':['01110','10001','00001','00010','00100','00000','00100'],'.':['0','0','0','0','0','1','1'],':':['0','1','1','0','1','1','0'],'-':['00000','00000','00000','11111','00000','00000','00000'],'%':['11001','11010','00100','01000','00100','01011','10011'],'/':['00001','00010','00100','01000','10000','00000','00000'],'+':['00000','00100','00100','11111','00100','00100','00000'],' ':[]};
 export class Display{
@@ -59,33 +60,49 @@ export class Display{
 			  this.print('KEY OK',true);
 			  this.print('WAIT TALK',true);
 			 }
-				 paintKeyBad(){
-				  this.reset();
-				  this.size=1;
-				  this.color=1;
-				  this.x=0;this.y=0;
-				  this.print('WIFI OK',true);
-				  this.print('KEY BAD',true);
-				  this.print('RETRY KEY',true);
-				 }
-				 paintListening(){
-				  this.reset();
-				  this.size=1;
-				  this.color=1;
-				  this.x=0;this.y=0;
-				  this.print('WIFI OK',true);
-				  this.print('LISTEN',true);
-				  this.print('SPEAK NOW',true);
-				 }
-				 paintListenWait(){
-				  this.reset();
-				  this.size=1;
-				  this.color=1;
-				  this.x=0;this.y=0;
-				  this.print('WIFI OK',true);
-				  this.print('LISTEN',true);
-				  this.print('WRITING',true);
-				 }
+					 paintFail(kind,code){
+					  this.reset();
+					  this.size=1;
+					  this.color=1;
+					  this.x=0;this.y=0;
+					  for(const line of oledFailLines(kind,code)) this.print(line,true);
+					 }
+					 paintKeyBad(code){this.paintFail('key',code);}
+					 paintFace(kind){
+					  this.reset();
+					  this.size=1;
+					  this.color=1;
+					  const left=40,right=88,ey=26;
+					  const eyes=(pupilX,pupilY,r=14,pr=6)=>{
+					    this.circle(left,ey,r,1,true);
+					    this.circle(right,ey,r,1,true);
+					    this.circle(left+pupilX,ey+pupilY,pr,0,true);
+					    this.circle(right+pupilX,ey+pupilY,pr,0,true);
+					  };
+					  if(kind==='listen'){
+					    eyes(3,2,14,6);
+					    this.rect(56,50,16,3,1,true,1);
+					    return;
+					  }
+					  if(kind==='think'){
+					    this.rect(26,24,28,5,1,true,2);
+					    this.rect(74,24,28,5,1,true,2);
+					    this.circle(64,50,5,1,false);
+					    return;
+					  }
+					  if(kind==='speak'){
+					    eyes(0,1,13,5);
+					    this.circle(64,50,11,1,true);
+					    this.circle(64,50,6,0,true);
+					    return;
+					  }
+					  eyes(0,0,14,6);
+					  this.line(50,48,56,54,1);
+					  this.line(56,54,72,54,1);
+					  this.line(72,54,78,48,1);
+					 }
+					 paintListening(){this.paintFace('listen');}
+					 paintListenWait(){this.paintFace('listen');}
 				 paintHeard(text){
 				  this.reset();
 				  this.size=1;
@@ -107,67 +124,23 @@ export class Display{
 				  this.print(ascii.slice(0,16),true);
 				  if(ascii.length>16) this.print(ascii.slice(16,32),true);
 				 }
-				 paintListenBad(){
-				  this.reset();
-				  this.size=1;
-				  this.color=1;
-				  this.x=0;this.y=0;
-				  this.print('LISTEN BAD',true);
-				  this.print('RETRY',true);
-				 }
-				 paintThinking(){
-				  this.reset();
-				  this.size=1;
-				  this.color=1;
-				  this.x=0;this.y=0;
-				  this.print('WIFI OK',true);
-				  this.print('THINK...',true);
-				  this.print('WRITING',true);
-				 }
-				 paintReply(text){
-				  this.reset();
-				  this.size=1;
-				  this.color=1;
-				  this.x=0;this.y=0;
-				  const raw=String(text||'').replace(/\s+/g,' ').trim();
-				  const ascii=raw.replace(/[^\x20-\x7E]/g,'').trim().slice(0,32);
-				  this.print('REPLY',true);
-				  if(!raw){
-				    this.print('NO TEXT',true);
-				    this.print('TRY AGAIN',true);
-				    return;
-				  }
-				  if(!ascii){
-				    this.print('CHINESE',true);
-				    this.print('SEE TOAST',true);
-				    return;
-				  }
-				  this.print(ascii.slice(0,16),true);
-				  if(ascii.length>16) this.print(ascii.slice(16,32),true);
-				 }
-					 paintReplyBad(){
-					  this.reset();
-					  this.size=1;
-					  this.color=1;
-					  this.x=0;this.y=0;
-					  this.print('REPLY BAD',true);
-					  this.print('RETRY',true);
+					 paintListenBad(code){this.paintFail('listen',code);}
+					 paintThinking(){this.paintFace('think');}
+					 paintIdle(){this.paintFace('idle');}
+					 paintReply(text){
+					  const raw=String(text||'').replace(/\s+/g,' ').trim();
+					  if(!raw){
+					    this.reset();
+					    this.size=1;
+					    this.color=1;
+					    this.x=0;this.y=0;
+					    this.print('REPLY BAD',true);
+					    this.print('RETRY',true);
+					    return;
+					  }
+					  this.paintFace('idle');
 					 }
-					 paintSpeaking(){
-					  this.reset();
-					  this.size=1;
-					  this.color=1;
-					  this.x=0;this.y=0;
-					  this.print('WIFI OK',true);
-					  this.print('SPEAKING',true);
-					  this.print('LISTEN',true);
-					 }
-					 paintSpeakBad(){
-					  this.reset();
-					  this.size=1;
-					  this.color=1;
-					  this.x=0;this.y=0;
-					  this.print('SPEAK BAD',true);
-					  this.print('RETRY',true);
-					 }
+						 paintReplyBad(code){this.paintFail('reply',code);}
+						 paintSpeaking(){this.paintFace('speak');}
+						 paintSpeakBad(code){this.paintFail('speak',code);}
 				}

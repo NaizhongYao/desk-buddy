@@ -91,6 +91,23 @@ export function classifyKeyHealth(res = {}) {
   return { ok: false, code: 'bad', message: '钥匙检查没有通过。请让大人核对 MiniMax API key。' };
 }
 
+export function oledFailLines(kind = 'listen', code = 'bad') {
+  const c = String(code || 'bad');
+  if (c === 'network') return ['NET BAD', 'CHECK WIFI', 'RETRY'];
+  if (c === 'auth') return ['KEY BAD', 'RETRY KEY'];
+  if (c === 'quota') return ['NO QUOTA', 'ASK ADULT'];
+  if (c === 'rate') return ['TOO FAST', 'WAIT'];
+  if (c === 'large' || c === 'long') return ['TOO LONG', 'SHORTER'];
+  if (c === 'format') return ['MIC BAD', 'CLOSER'];
+  if (c === 'empty') return kind === 'listen' ? ['DIDNT HEAR', 'TRY AGAIN'] : ['NO TEXT', 'TRY AGAIN'];
+  if (c === 'server') return ['BUSY NOW', 'WAIT'];
+  if (c === 'student') return ['SEE TEACHER'];
+  if (kind === 'key') return ['KEY BAD', 'RETRY KEY'];
+  if (kind === 'listen') return ['LISTEN BAD', 'RETRY'];
+  if (kind === 'reply') return ['REPLY BAD', 'RETRY'];
+  return ['SPEAK BAD', 'RETRY'];
+}
+
 export function asciiHeard(text) {
   const raw = String(text || '').replace(/\s+/g, ' ').trim();
   const ascii = raw.replace(/[^\x20-\x7E]/g, '').trim().slice(0, 32);

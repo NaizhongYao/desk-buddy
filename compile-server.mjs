@@ -31,7 +31,7 @@ await fs.mkdir(CACHE_DIR, { recursive: true });
 app.post('/api/compile', async (req, res) => {
   const { code } = req.body;
   
-  if (!code || typeof code !== 'string' || code.length > 50000) {
+  if (!code || typeof code !== 'string' || code.length > 120000) {
     console.error('[编译] 代码验证失败: 无效或过长');
     return res.status(400).json({ error: '代码无效或过长', message: '代码无效或过长' });
   }
