@@ -204,8 +204,8 @@ function selectedPart(id){
 function wiringFrozen(){return wiringMode!=='custom';}
 function sceneHint(){
   return wiringFrozen()
-    ?'零件和电线已经固定 · 点空白处拖动平移 · 滚轮缩放 · 右键旋转'
-    :'点空孔接线 · 点电线可选中后删除 · 点空白处拖动平移 · 滚轮缩放 · 右键旋转';
+    ?'零件和电线已经固定 · 点空白处拖动平移 · Shift+滚轮也可平移 · 滚轮缩放 · 右键旋转'
+    :'点空孔接线 · 点电线可选中后删除 · 点空白处拖动平移 · Shift+滚轮也可平移 · 滚轮缩放 · 右键旋转';
 }
 function copyWires(list){return (list||[]).map(w=>({a:w.a,b:w.b}));}
 function sameWires(a,b){
@@ -331,7 +331,7 @@ function stepHint(spec){
   const [a,b,title,text]=spec;
   const ha=freeHole(a),hb=freeHole(b);
   const pinA=pinHoleLabel(a),pinB=pinHoleLabel(b);
-  if(!ha||!hb) return `${text} 针脚旁边的空孔被挡住了，请先把零件挪开一点。`;
+  if(!ha||!hb) return `${text} 针脚旁边的空孔被零件遮挡，无法接线。请按亮起的其他空孔。`;
   return `${text} 针已经占着孔，请点旁边亮起来的空孔：先点 ${holeText(ha)}（靠近 ${pinA}），再点 ${holeText(hb)}（靠近 ${pinB}）。同一排空孔也通电。`;
 }
 function markCompleted(progress){
@@ -441,7 +441,13 @@ function updateGuide(){
     if(!spec){
       const missing=lesson.parts.filter(id=>!active().includes(id));
       const newTotal=progress.newWires.length||progress.total;
-      if(missing.length){
+      if(progress.completed){
+        $('step-title').textContent=`${newTotal} / ${newTotal} · ${lesson.name}完成`;
+        $('step-text').textContent=missing.length
+          ?`接线完成！${currentLesson<lessons.length?'可以开始下一课。下一课会用到：'+missing.map(id=>definitions.find(d=>d.id===id)?.name||id).join('、')+'。':'可以载入示例继续玩。'}`
+          :(currentLesson<lessons.length?'接线完成！点「运行」看屏幕，或开始下一课。':'接线完成！点「运行」看屏幕，或载入这一课的示例。');
+        markCompleted(progress);
+      }else if(missing.length){
         const names=missing.map(id=>definitions.find(d=>d.id===id)?.name||id).join('、');
         $('step-title').textContent=`${newTotal} / ${newTotal} · 还差零件`;
         $('step-text').textContent=`线接上了。请从左边零件盒把 ${names} 放到桌上。`;
@@ -545,8 +551,8 @@ function updateLifeLock(){
   const readyBtn=$('life-lock-ready');
   const phoneBtn=$('life-lock-phone');
   const guideBtn=$('life-lock-guide');
-  if(readyBtn) readyBtn.hidden=false;
-  if(phoneBtn) phoneBtn.hidden=true;
+  if(readyBtn) readyBtn.hidden=wiringMode==='talk';
+  if(phoneBtn) phoneBtn.hidden=wiringMode!=='talk';
   if(guideBtn) guideBtn.textContent='看接线指导';
   if(title) title.textContent='先接线，它才会听你的话';
   if(copy) copy.textContent='把屏幕的四根线接上。接完这边就会亮起来。也可以点「已经接好」看完整范例。';
@@ -583,11 +589,13 @@ function switchLesson(lessonId,opts={}){
   const lesson=lessons[lessonId-1];
   pending=null;
   selectedWire=null;
+  selected=null;
   table.select(null);
   if(restart) resetCurrentLessonBoard();
   else addMissingParts(lesson);
   commitWireHistory();
   updateWires();
+  updateSelectionBar();
   toast(restart
     ?(lessonId===1?`重新开始${lesson.name}。`:`重新开始${lesson.name}：上一课的线还在，接着接新零件。`)
     :(lessonId===1?`开始${lesson.name}：${lesson.description}`:`开始${lesson.name}：上一课的线还在。${lesson.description}`));
@@ -651,7 +659,12 @@ function connect(id){
   else if(wrong)toast(wrong);
   else{
     const progress=getLessonProgress(currentLesson,after,active());
-    toast(progress.completed?'这根线接对了，这一课完成。':'这根线接对了。');
+    const thisWireNeeded=lesson.wires.some(lw=>checkWire(after,lw.slice(0,2))&&(graphConnected(after,from,lw[0])||graphConnected(after,from,lw[1])));
+    if(thisWireNeeded){
+      toast(progress.completed?'这根线接对了，这一课完成。':'这根线接对了。');
+    }else{
+      toast('这根线接上了，但不是这一课要求的。');
+    }
   }
 }
 function refresh(){const c=checkCircuit(wires,active(),sda,scl);display.render(ctx,ready&&c.ready);table.refreshScreen();}
@@ -718,8 +731,8 @@ function setEditorMode(mode,silent=false){
 function programHasLife(program){
   return !!(listUnits(program).length||(program.stage||[]).length);
 }
-async function run(){if(!table){toast('零件尚未加载完');return;}if(wiringMode==='talk'){toast(canListen(provision)?'对话模式不运行右边的程序。请点中间的「开始听」。':isOnline(provision)?'已经连上家里的网。请先检查 MiniMax 钥匙。对话模式不运行右边的程序。':'对话模式先连热点、打开 192.168.4.1。现在还不能开始听，也不运行右边的程序。');updateLifeLock();return;}if(!lifeIsUnlocked()){toast('先把屏幕的四根线接上，或点「已经接好」。');updateLifeLock();return;}stop();logs=[];$('log').textContent='';display.reset();sda=5;scl=4;modes={};values={};const generation=runGeneration;try{if(editorMode==='blocks'){const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));const program=blocksUI.getProgram();if(!programHasLife(program)){toast('还没有积木。先点左边的圆，或载入一个积木示例。');$('status').textContent='尚未运行';log('空白档案不会动。点左边角色，或载入「小球撞边」。');return;}const flags=analyze(program);lastProgram=generateSketch(program);refreshBlocksCode();await ensureAudio();if(flags.mic)await ensureMic();ready=check.ready;if(!ready&&flags.draw){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');$('status').textContent='尚未运行';log('屏幕还没接好：先把 OLED 的 GND/VCC/SCL/SDA 接上，画面才会出现。也可以点「已经接好」看完整范例。');return;}if(flags.amp&&flags.led)toast('真机上哔声会占用蓝灯那根脚。网页演示互不影响。');controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(flags.amp||flags.mic?'积木可以在网页里演示。喇叭和麦克风烧到真板子才走零件上的针脚。':'积木检查通过，正在运行。');const own=controller;await executeBlocks(program,{display,refresh(){display.render(ctx,ready);table?.refreshScreen();},delay:ms=>delayMs(ms,own.signal),playTone,stopTone,readMic,led(on){table.led(!!on);$('ledstate').textContent='板载 LED：'+(on?'点亮':'关闭');}},own.signal);return;}if(/ESP_I2S|I2SClass/.test(editor.value)){lastProgram=editor.value;await ensureAudio();if(/GAME_DINO|GAME_STAR|GAME_MOLE|PIN_MIC_|setPins\s*\(\s*21\s*,\s*20/.test(editor.value))await ensureMic();controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(/GAME_DINO|GAME_STAR|GAME_MOLE/.test(editor.value)?'这个小游戏烧到板子才走真实麦克风。网页里请对着电脑麦克风拍手或喊一声。':'这个示例是给真实板子烧录的。MAX98357 只听 I2S，网页不能驱动真实喇叭。下面用电脑喇叭/麦克风演示。');const own=controller;const demo=compile(virtualSketch(editor.value));await execute(demo,{call:hardware},own.signal);return;}const program=compile(editor.value);const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));lastProgram=editor.value;await ensureAudio();if(/analogRead\s*\(/.test(editor.value))await ensureMic();if(!check.ready){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');log('屏幕还没接好：代码会跑，但眼睛是黑的。请先把 OLED 的 GND/VCC/SCL/SDA 接上。');}controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log('语法检查通过，正在执行 setup() / loop()。');const own=controller;await execute(program,{call:hardware},own.signal);}catch(e){if(e.message==='STOPPED'||generation!==runGeneration)return;stop('运行出错');log('错误：'+e.message);const m=/第 (\d+) 行/.exec(e.message);if(m&&editorMode==='code'){let start=editor.value.split('\n').slice(0,+m[1]-1).join('\n').length;const line=editor.value.split('\n')[+m[1]-1]||'';editor.focus();editor.setSelectionRange(start,start+line.length+1);}}}
-for(const d of definitions){const b=document.createElement('button');b.className='partbtn';b.dataset.part=d.id;const sw=d.id==='btn'?document.createElement('span'):document.createElement('img');sw.className='partswatch';if(d.id!=='btn'){sw.src='./assets/guide-'+d.id+'.png';sw.alt='';sw.onerror=()=>{sw.hidden=true;}}const span=document.createElement('span'),bold=document.createElement('b'),small=document.createElement('small');bold.textContent=d.name;small.textContent={oled:'眼睛 · 把表情画出来',esp:'大脑 · 听懂你的程序',amp:'功放 · 帮声音放大',mic:'耳朵 · 听听周围的声音',speaker:'嘴巴 · 发出好听的声音',btn:'说话键 · 按下才通，不是 RST'}[d.id];span.append(bold,small);b.append(sw,span);b.onclick=()=>{if(!table||wiringFrozen())return;const lesson=lessons[currentLesson-1];if(d.id==='btn'){toast('说话按键在「对话」模式里才会用到。');return;}if(!lesson.parts.includes(d.id)){toast(`这个零件在${lesson.name}里还用不上。先把这一课的线接完，下一课就会用到它。`);return;}if(controller)stop('零件已更改');table.setActive(d.id,true);table.select(d.id);updateGuide();if(d.id==='amp'||d.id==='speaker')toast('网页里声音走电脑喇叭。烧到板子才走功放和喇叭。');if(d.id==='mic')toast('网页里声音大小走电脑麦克风。烧到板子才走零件上的麦克风。');};$('catalog').append(b);}
+async function run(){if(!table){toast('零件尚未加载完');return;}if(wiringMode==='talk'){toast(canListen(provision)?'对话模式不运行右边的程序。请点中间的「开始听」。':isOnline(provision)?'已经连上家里的网。请先检查 MiniMax 钥匙。对话模式不运行右边的程序。':'对话模式先连热点、打开 192.168.4.1。现在还不能开始听，也不运行右边的程序。');updateLifeLock();return;}if(!lifeIsUnlocked()){toast('先把屏幕的四根线接上，或点「已经接好」。');updateLifeLock();return;}pending=null;selectedWire=null;stop();logs=[];$('log').textContent='';display.reset();sda=5;scl=4;modes={};values={};const generation=runGeneration;try{if(editorMode==='blocks'){const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));const program=blocksUI.getProgram();if(!programHasLife(program)){toast('还没有积木。先点左边的圆，或载入一个积木示例。');$('status').textContent='尚未运行';log('空白档案不会动。点左边角色，或载入「小球撞边」。');return;}const flags=analyze(program);lastProgram=generateSketch(program);refreshBlocksCode();await ensureAudio();if(flags.mic)await ensureMic();ready=check.ready;if(!ready&&flags.draw){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');$('status').textContent='尚未运行';log('屏幕还没接好：先把 OLED 的 GND/VCC/SCL/SDA 接上，画面才会出现。也可以点「已经接好」看完整范例。');return;}if(flags.amp&&flags.led)toast('真机上哔声会占用蓝灯那根脚。网页演示互不影响。');controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(flags.amp||flags.mic?'积木可以在网页里演示。喇叭和麦克风烧到真板子才走零件上的针脚。':'积木检查通过，正在运行。');const own=controller;await executeBlocks(program,{display,refresh(){display.render(ctx,ready);table?.refreshScreen();},delay:ms=>delayMs(ms,own.signal),playTone,stopTone,readMic,led(on){table.led(!!on);$('ledstate').textContent='板载 LED：'+(on?'点亮':'关闭');}},own.signal);return;}if(/ESP_I2S|I2SClass/.test(editor.value)){lastProgram=editor.value;await ensureAudio();if(/GAME_DINO|GAME_STAR|GAME_MOLE|PIN_MIC_|setPins\s*\(\s*21\s*,\s*20/.test(editor.value))await ensureMic();controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(/GAME_DINO|GAME_STAR|GAME_MOLE/.test(editor.value)?'这个小游戏烧到板子才走真实麦克风。网页里请对着电脑麦克风拍手或喊一声。':'这个示例是给真实板子烧录的。MAX98357 只听 I2S，网页不能驱动真实喇叭。下面用电脑喇叭/麦克风演示。');const own=controller;const demo=compile(virtualSketch(editor.value));await execute(demo,{call:hardware},own.signal);return;}const program=compile(editor.value);const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));lastProgram=editor.value;await ensureAudio();if(/analogRead\s*\(/.test(editor.value))await ensureMic();if(!check.ready){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');log('屏幕还没接好：代码会跑，但眼睛是黑的。请先把 OLED 的 GND/VCC/SCL/SDA 接上。');}controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log('语法检查通过，正在执行 setup() / loop()。');const own=controller;await execute(program,{call:hardware},own.signal);}catch(e){if(e.message==='STOPPED'||generation!==runGeneration)return;stop('运行出错');log('错误：'+e.message);const m=/第 (\d+) 行/.exec(e.message);if(m&&editorMode==='code'){let start=editor.value.split('\n').slice(0,+m[1]-1).join('\n').length;const line=editor.value.split('\n')[+m[1]-1]||'';editor.focus();editor.setSelectionRange(start,start+line.length+1);}}}
+for(const d of definitions){const b=document.createElement('button');b.className='partbtn';b.dataset.part=d.id;const sw=d.id==='btn'?document.createElement('span'):document.createElement('img');sw.className='partswatch';if(d.id!=='btn'){sw.src='./assets/guide-'+d.id+'.png';sw.alt='';sw.onerror=()=>{sw.hidden=true;}}const span=document.createElement('span'),bold=document.createElement('b'),small=document.createElement('small');bold.textContent=d.name;small.textContent={oled:'眼睛 · 把表情画出来',esp:'大脑 · 听懂你的程序',amp:'功放 · 帮声音放大',mic:'耳朵 · 听听周围的声音',speaker:'嘴巴 · 发出好听的声音',btn:'说话键 · 按下才通，不是 RST'}[d.id];span.append(bold,small);b.append(sw,span);b.onclick=()=>{if(!table||wiringFrozen())return;const lesson=lessons[currentLesson-1];if(d.id==='btn'){toast('说话按键在「对话」模式里才会用到。');return;}if(!lesson.parts.includes(d.id)){toast(`这个零件在${lesson.name}里还用不上。先把这一课的线接完，下一课就会用到它。`);updateLessonUI();return;}if(controller)stop('零件已更改');table.setActive(d.id,true);table.select(d.id);updateGuide();if(d.id==='amp'||d.id==='speaker')toast('网页里声音走电脑喇叭。烧到板子才走功放和喇叭。');if(d.id==='mic')toast('网页里声音大小走电脑麦克风。烧到板子才走零件上的麦克风。');};$('catalog').append(b);}
 for(let i=1;i<=lessons.length;i++){const btn=document.createElement('button');btn.id='lesson-'+i;btn.className='lesson-btn';btn.textContent=lessons[i-1].name;btn.onclick=()=>switchLesson(i);$('lesson-selector').append(btn);}
 const FULL_WIRING=[
   ['esp:G','rail:R-'],['esp:3.3','rail:R+'],
@@ -764,7 +777,7 @@ function setWiringMode(mode,resetParts=false,silent=false){
     table.select(null);
     applyReadyWiring();
     blackScreen();
-    if(!silent)toast(wires.length>=FULL_WIRING.length?'已经接好：五个零件都在，可以直接运行。零件和电线已经固定。这是沙盒，不会替你解锁下一课。':'已经接好：有些孔被挡住，自动接线未完成。');
+    if(!silent)toast(wires.length>=FULL_WIRING.length?'已经接好：五个零件都在，可以直接运行。零件和电线已经固定。这是沙盒，不会替你解锁下一课。':'已经接好：零件位置固定，部分孔被遮挡导致部分线未接上。');
   }else if(resetParts||prev==='ready'||prev==='talk'){
     resetCurrentLessonBoard();
     blackScreen();
@@ -1287,7 +1300,17 @@ updateLifeToggle();
 $('toggle-life')?.addEventListener('click',()=>setLifeOpen(!lifeOpen));
 $('mode-blocks').onclick=()=>setEditorMode('blocks');
 $('mode-code').onclick=()=>setEditorMode('code');
-$('load-block-example').onclick=()=>{const opt=$('block-example').selectedOptions[0];if(opt?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完。');return;}if(!confirm('载入积木示例会替换当前积木，是否继续？'))return;stop('积木示例已载入');blocksUI.setProgram(recipe($('block-example').value));refreshBlocksCode();};
+$('load-block-example').onclick=()=>{
+  const opt=$('block-example').selectedOptions[0];
+  if(opt?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完。');return;}
+  if(!confirm('载入积木示例会替换当前积木，是否继续？'))return;
+  const opt2=$('block-example').selectedOptions[0];
+  if(opt2?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完。');return;}
+  stop('积木示例已载入');
+  blocksUI.setProgram(recipe($('block-example').value));
+  refreshBlocksCode();
+  updateHistoryButtons();
+};
 $('run').onclick=run;$('stop').onclick=()=>stop();$('clearlog').onclick=()=>{logs=[];$('log').textContent='';};$('help').onclick=()=>$('helpdialog').showModal();$('top').onclick=()=>{table?.setMode('top');$('top').classList.add('active');$('three').classList.remove('active');$('scenehint').textContent=sceneHint();};$('xray').onclick=()=>{const on=$('xray').getAttribute('aria-pressed')!=='true';$('xray').setAttribute('aria-pressed',String(on));table?.setXray(on);$('xray').classList.toggle('active',on);};$('three').onclick=()=>{table?.setMode('three');$('three').classList.add('active');$('top').classList.remove('active');$('scenehint').textContent=sceneHint();};$('resetview').onclick=()=>{table?.center();showZoom();};$('zoom-in').onclick=()=>table?.zoomBy(1.2);$('zoom-out').onclick=()=>table?.zoomBy(1/1.2);$('zoom-reset').onclick=()=>table?.zoomTo(1);$('mode-custom').onclick=()=>setWiringMode('custom');$('mode-ready').onclick=()=>setWiringMode('ready');$('mode-talk')?.addEventListener('click',()=>setWiringMode('talk'));
 $('talk-join')?.addEventListener('click',joinHotspot);
 $('talk-open')?.addEventListener('click',openPhone);
@@ -1297,20 +1320,27 @@ $('talk-listen')?.addEventListener('click',onTalkListen);
 $('talk-connect')?.addEventListener('click',()=>$('connect-board')?.click());
 $('talk-flash')?.addEventListener('click',flashTalkFirmware);$('remove').onclick=()=>{if(wiringFrozen()||!selected)return;const id=selected;stop('零件已收回');const board=table.state();wires=wires.filter(w=>!wireTouchesPart(w,id,board));table.setActive(id,false);pending=null;selectedWire=null;table.select(null);commitWireHistory();updateWires();};$('remove-wire').onclick=()=>{if(wiringFrozen()||!Number.isInteger(selectedWire))return;deleteWireAt(selectedWire);toast('这根线已拿掉。');};$('step-back').onclick=stepBack;$('step-forward').onclick=stepForward;
 function lesson(){stop();table.center();switchLesson(currentLesson,{restart:true});}
-$('lesson').onclick=()=>{const name=lessons[currentLesson-1].name;const msg=currentLesson===1?`重新开始${name}？零件和接线会重置，代码会保留。`:`重新开始${name}？这一课新接的线会清掉，上一课的线还在。代码会保留。`;if(confirm(msg))lesson();};$('loadexample').onclick=()=>{const opt=$('example').selectedOptions[0];if(opt?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完，或点「已经接好」再载入。');return;}if(editor.value!==lastProgram&&editor.value!==examples.eyes&&!confirm('载入示例会替换编辑器中的代码，是否继续？'))return;stop('示例已载入');editor.value=examples[$('example').value];lastProgram=editor.value;numbers();};
+$('lesson').onclick=()=>{const name=lessons[currentLesson-1].name;const msg=currentLesson===1?`重新开始${name}？零件和接线会重置，积木和代码会保留。`:`重新开始${name}？这一课新接的线会清掉，上一课的线还在。积木和代码会保留。`;if(confirm(msg))lesson();};$('loadexample').onclick=()=>{const opt=$('example').selectedOptions[0];if(opt?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完，或点「已经接好」再载入。');return;}if(editor.value!==lastProgram&&editor.value!==examples.eyes&&!confirm('载入示例会替换编辑器中的代码，是否继续？'))return;stop('示例已载入');editor.value=examples[$('example').value];lastProgram=editor.value;numbers();updateHistoryButtons();};
 editor.addEventListener('input',()=>{numbers();if(controller)stop('代码已修改，请重新运行');});editor.addEventListener('scroll',()=>{$('numbers').scrollTop=editor.scrollTop;});editor.addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();const start=editor.selectionStart,end=editor.selectionEnd;editor.setRangeText('  ',start,end,'end');editor.dispatchEvent(new Event('input'));}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();run();}});
-function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);}
 function project(){return{version:3,editorMode,code:editor.value,blocks:blocksUI.getProgram(),parts:table.state(),wires};}
 function exportCode(){const sketch=currentSketch();download('desk-buddy.ino',sketch,'text/x-c++src;charset=utf-8');toast('代码文件已下载，发给老师就好。');}
 function showHandoff(){$('handoff-code').value=currentSketch();$('handoffdialog').showModal();}
 async function copyCode(){const code=currentSketch();try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(code);}else{const field=$('handoff-code');field.focus();field.select();if(!document.execCommand('copy'))throw Error('复制不可用');}toast('代码已复制！现在把它粘贴发给老师。');}catch{toast('复制没有成功，试试点击“下载 .ino”。');}}
 $('handoff').onclick=showHandoff;$('copy-code').onclick=copyCode;
-$('save').onclick=()=>{if(!table)return;download('desk-buddy.json',JSON.stringify(project(),null,2),'application/json');toast('作品已保存到下载文件夹');};$('export').onclick=()=>download('desk_buddy.ino',editor.value,'text/plain');$('open').onclick=()=>$('file').click();$('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{if(file.size>200000)throw Error('文件太大');const data=await file.text();if(!confirm('打开文件会替换当前作品中的相应内容，是否继续？'))return;if(file.name.endsWith('.ino')){stop('代码已打开');editor.value=data;lessonEditorMode='code';setEditorMode('code',true);}else{const p=validateProject(JSON.parse(data));stop('作品已打开');editor.value=p.code;table.restore(p.parts);wires=p.wires.map(w=>({a:w.a,b:w.b}));pending=null;selectedWire=null;commitWireHistory();updateWires();blocksUI.setProgram(p.version===3&&p.blocks?validateProgram(p.blocks):defaultProgram());refreshBlocksCode();const next=p.version===3?(p.editorMode==='code'?'code':'blocks'):'code';lessonEditorMode=next;setEditorMode(next,true);}numbers();lastProgram=editorMode==='blocks'?generateSketch(blocksUI.getProgram()):editor.value;}catch(e){toast('打开失败：'+e.message);}$('file').value='';};
-$('export').onclick=exportCode;
+$('save').onclick=()=>{if(!table)return;download('desk-buddy.json',JSON.stringify(project(),null,2),'application/json');toast('作品已保存到下载文件夹');};$('export').onclick=exportCode;$('open').onclick=()=>$('file').click();$('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{if(file.size>200000)throw Error('文件太大');const data=await file.text();if(!confirm('打开文件会替换当前作品中的相应内容，是否继续？'))return;if(file.name.endsWith('.ino')){stop('代码已打开');editor.value=data;lessonEditorMode='code';setEditorMode('code',true);numbers();}else{const p=validateProject(JSON.parse(data));stop('作品已打开');editor.value=p.code;table.restore(p.parts);wires=p.wires.map(w=>({a:w.a,b:w.b}));pending=null;selectedWire=null;selected=null;table.select(null);commitWireHistory();updateWires();updateSelectionBar();blocksUI.setProgram(p.version===3&&p.blocks?validateProgram(p.blocks):defaultProgram());refreshBlocksCode();const next=p.version===3?(p.editorMode==='code'?'code':'blocks'):'code';lessonEditorMode=next;setEditorMode(next,true);}numbers();lastProgram=editorMode==='blocks'?generateSketch(blocksUI.getProgram()):editor.value;}catch(e){toast('打开失败：'+e.message);}$('file').value='';};
 try{table=await createTable($('viewport'),canvas,{pin:connect,select:selectedPart,pickWire,change:()=>{stop('孔位已更改，请重新运行');pending=null;selectedWire=null;if(wiringMode==='ready')applyReadyWiring();if(wiringMode==='talk'){applyTalkWiring();paintTalkScreen();}commitWireHistory();updateWires();},message:toast,zoom:showZoom});table.center();showZoom(1);switchLesson(1);if(completedLessons.length)toast('课程还记得：已完成的课仍然解锁。桌上的线要重新接，也可以打开上次保存的作品。');$('loading').remove();}catch(e){$('loading').textContent='三维零件加载失败，请刷新页面。'+e.message;log(e.message);$('run').disabled=true;}
 window.addEventListener('keydown',e=>{
   const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)||e.target.isContentEditable;
-  if(e.key==='Escape'){if(wiringFrozen()) return;pending=null;pickWire(null);updateGuide();return;}
+  if(e.key==='Escape'){
+    const anyDialogOpen=document.querySelector('dialog[open]');
+    if(anyDialogOpen) return;
+    if(wiringFrozen()) return;
+    pending=null;
+    pickWire(null);
+    updateGuide();
+    return;
+  }
   if(typing) return;
   if(wiringFrozen()) return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey) stepForward(); else stepBack();return;}
@@ -1393,7 +1423,7 @@ $('connect-board').onclick = async () => {
       $('connect-board').disabled = false;
       $('flash').disabled = true;
       toast('⚠️ 板子已断开连接');
-    });
+    }, { once: true });
     
     isConnected = true;
     $('connect-board').textContent = `✓ 已连接: ${chipName}`;

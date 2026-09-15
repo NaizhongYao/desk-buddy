@@ -13,6 +13,7 @@ body>main{height:calc(100dvh - 82px);min-height:760px;padding:18px;gap:16px;grid
 .life-lock-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .life-lock-actions button{min-height:38px;font-size:14px}
 .guide.nudge{box-shadow:inset 0 0 0 2px #8cab74}
+#wirelist{padding-right:8px}
 .coding.life-locked .codebar,
 .coding.life-locked #blocks-root,
 .coding.life-locked .editor,
@@ -46,6 +47,21 @@ body:not(.teacher-station) #flash{display:none!important}
 body.talk-mode .guide{max-height:min(240px,28vh);flex:0 1 auto}
 body.talk-mode #lesson,
 body.talk-mode .lesson-selector{display:none}
+body.life-collapsed>main{grid-template-columns:212px minmax(0,1fr)}
+body.life-collapsed .coding{display:none}
+.workbar .lifeseg{margin-left:2px}
+#toggle-life{min-width:44px}
+.coding.talk-code-only .code-mode-seg,
+.coding.talk-code-only #block-examples,
+.coding.talk-code-only #blocks-root,
+.coding.talk-code-only #blocks-peek,
+.coding.talk-code-only #life-lock{display:none!important}
+.coding.talk-code-only.blocks-mode .editor,
+.coding.talk-code-only.blocks-mode #code-examples{display:flex}
+@media(min-width:1650px){body.life-collapsed>main{grid-template-columns:235px minmax(0,1fr)}}
+@media(max-width:1200px){body.life-collapsed>main{grid-template-columns:180px minmax(0,1fr)}}
+@media(max-width:980px){body.life-collapsed>main{grid-template-columns:185px minmax(0,1fr)}body.life-collapsed .coding{display:none}}
+@media(max-width:560px){body.life-collapsed>main{grid-template-columns:minmax(0,1fr)}body.life-collapsed .coding{display:none}}
 .partbtn[data-part=btn] .partswatch{display:block;background:#f3ddd0;width:53px;height:56px;border:0;box-shadow:inset 0 0 0 8px #f3ddd0,inset 0 0 0 14px #c45c26}
 dialog.phone-portal{padding:0;border:0;background:transparent;max-width:none}
 dialog.phone-portal::backdrop{background:#24362a88}

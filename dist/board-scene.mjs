@@ -624,6 +624,10 @@ export async function createTable(container, screenCanvas, callbacks) {
         (h.net.includes("+") || h.net.includes("-")
           ? "同侧同色轨相通"
           : "同一行 " + (h.net[0] === "L" ? "a–e" : "f–j") + " 相通");
+    } else if (mode === "three") {
+      info.textContent = "3D 模式：切到俯视可看孔信息";
+    } else {
+      info.textContent = "";
     }
     
     // 更新预览线
