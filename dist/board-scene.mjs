@@ -291,9 +291,10 @@ export async function createTable(container, screenCanvas, callbacks) {
   let selectedWire = null;
   let pending = null;
   let highlighted = [];
+  let taskLit = [];
   let xray = false;
   let mode = "top";
-  let drag = null;
+  let frozen = false;
 
   const texture = new T.CanvasTexture(screenCanvas);
   texture.magFilter = T.NearestFilter;
@@ -547,7 +548,20 @@ export async function createTable(container, screenCanvas, callbacks) {
       return;
     }
     if (e.button !== 0) return;
+    if (frozen) {
+      panning = { x: e.clientX, y: e.clientY };
+      capture(renderer.domElement, e.pointerId);
+      return;
+    }
     const p = point(e);
+    const h = mode === "top" ? nearest(p) : null;
+    if (h) {
+      selected = null;
+      callbacks.select(null);
+      callbacks.pin(h.id);
+      clear(previewWire);
+      return;
+    }
     const wireHits = ray
       .intersectObjects(wireObjects, false)
       .filter((v) => v.object.visible && Number.isInteger(v.object.userData.wireIndex));
@@ -563,33 +577,13 @@ export async function createTable(container, screenCanvas, callbacks) {
       .find((v) => v.object.visible && v.object.userData.part);
     if (hit) {
       selected = hit.object.userData.part;
-      callbacks.pickWire?.(null);
       callbacks.select(selected);
-      drag = { id: selected, y: p.y, old: parts.get(selected) };
-      capture(renderer.domElement, e.pointerId);
-      return;
-    }
-    const h = mode === "top" ? nearest(p) : null;
-    if (h && !occupied(state(), wires).has(h.id)) {
-      selected = null;
-      callbacks.select(null);
-      callbacks.pickWire?.(null);
-      callbacks.pin(h.id);
-      clear(previewWire);
       return;
     }
     if (wireHits.length) {
       selected = null;
       callbacks.select(null);
       callbacks.pickWire?.(wireHits[0].object.userData.wireIndex);
-      return;
-    }
-    if (h) {
-      selected = null;
-      callbacks.select(null);
-      callbacks.pickWire?.(null);
-      callbacks.pin(h.id);
-      clear(previewWire);
       return;
     }
     selected = null;
@@ -612,10 +606,6 @@ export async function createTable(container, screenCanvas, callbacks) {
   function endPointer() {
     panning = null;
     orbit = null;
-    if (drag) {
-      drag = null;
-      callbacks.change();
-    }
   }
   window.addEventListener("pointerup", endPointer);
   window.addEventListener("pointercancel", endPointer);
@@ -637,7 +627,7 @@ export async function createTable(container, screenCanvas, callbacks) {
     }
     
     // 更新预览线
-    if (pending && h && mode === "top") {
+    if (pending && h && mode === "top" && !frozen) {
       const fromHole = holeMap.get(pending);
       if (fromHole && h.id !== pending) {
         clear(previewWire);
@@ -654,14 +644,6 @@ export async function createTable(container, screenCanvas, callbacks) {
       }
     } else if (previewWire.length > 0) {
       clear(previewWire);
-    }
-    
-    if (drag && drag.id !== "speaker") {
-      const row = drag.old.row + Math.round((drag.y - p.y) / 2.54);
-      if (validPlacement(state(), drag.id, row, wires)) {
-        install(placement(drag.id, row));
-        rebuild();
-      }
     }
   });
 
@@ -730,23 +712,20 @@ export async function createTable(container, screenCanvas, callbacks) {
     }
     const used = occupied(state(), wires);
     const cover = coveredHoles(state());
-    const selectedPins = relatedIds();
-    const nets = new Set([...selectedPins].map((id) => holeMap.get(id)?.net));
-    const reachable = new Set(
-      selectedPins.size
-        ? holes.filter((h) => nets.has(h.net) && !cover.has(h.id) && !used.has(h.id)).map((h) => h.id)
-        : highlighted.filter((id) => !cover.has(id) && !used.has(id)),
-    );
+    const taskSet = new Set(taskLit.filter((id) => !cover.has(id) || used.has(id)));
+    const netSet = new Set(highlighted.filter((id) => !cover.has(id) || used.has(id)));
     for (let i = 0; i < holes.length; i++) {
       const id = holes[i].id;
       const m = hitHoles[i];
       const blocked = cover.has(id);
-      const lit = reachable.has(id);
-      m.material.color.set(lit ? 0x19c9a5 : blocked ? 0x151c21 : used.has(id) ? 0xe08a3c : 0x2a3640);
-      m.material.emissive.set(lit ? 0x0a4e40 : 0x000000);
+      const task = taskSet.has(id);
+      const net = !task && netSet.has(id);
+      m.material.color.set(task ? 0xf0b429 : net ? 0x19c9a5 : blocked ? 0x151c21 : used.has(id) ? 0xe08a3c : 0x2a3640);
+      m.material.emissive.set(task ? 0x8a5a10 : net ? 0x06352c : 0x000000);
+      m.material.emissiveIntensity = task ? 0.55 : net ? 0.22 : 1;
       m.material.depthTest = true;
-      m.renderOrder = 0;
-      m.scale.setScalar(lit ? 1.12 : blocked ? 0.82 : 1);
+      m.renderOrder = task || net ? 1 : 0;
+      m.scale.setScalar(task ? 1.22 : net ? 1.06 : blocked ? 0.82 : 1);
     }
     renderer.render(scene, camera);
   }
@@ -769,13 +748,21 @@ export async function createTable(container, screenCanvas, callbacks) {
       selectedWire = Number.isInteger(index) ? index : null;
       rebuild();
     },
-    highlight(ids, from) {
-      highlighted = ids;
-      pending = from;
-      // 当取消高亮或切换起点时，清除预览线
-      if (!from) {
-        clear(previewWire);
+    highlight(taskIds, from, netIds) {
+      if (taskIds && !Array.isArray(taskIds) && typeof taskIds === "object") {
+        taskLit = taskIds.task || [];
+        highlighted = taskIds.net || [];
+        pending = taskIds.from ?? null;
+      } else {
+        taskLit = taskIds || [];
+        highlighted = netIds || [];
+        pending = from || null;
       }
+      if (!pending) clear(previewWire);
+    },
+    setFrozen(on) {
+      frozen = !!on;
+      if (frozen) clear(previewWire);
     },
     select(id) {
       selected = id;
@@ -798,7 +785,7 @@ export async function createTable(container, screenCanvas, callbacks) {
       return view.zoom;
     },
     rotate() {
-      callbacks.message?.("排针方向固定，以保证每根针脚插入独立孔组；拖动可更换行位。");
+      callbacks.message?.("排针方向固定。零件位置已经写死，不能拖动。");
     },
     flip() {
       callbacks.message?.("插入面包板的零件不能翻面；可切换 3D 观察。");

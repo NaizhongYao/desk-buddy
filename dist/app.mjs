@@ -1,11 +1,12 @@
 import {holes,holeMap,boardEdges,occupied,footprint,defaults,validPlacement,coveredHoles,freeOnNet,autoWires,placement} from './breadboard.mjs';
-import {compile,execute} from './runtime.mjs';import {examples,virtualSketch} from './examples.mjs';import {definitions,lessons,COMPANION_PARTS,COMPANION_WIRING,connected as graphConnected,checkCircuit as graphCheck,getLessonProgress,checkWire,diagnoseWrongWire,pinLabel,validateProject as oldValidate,keepWiresFromPreviousLessons,wireTouchesPart} from './circuit.mjs';import {Display} from './display.mjs';import {createTable} from './board-scene.mjs?v=20260912-23';import {initGuide} from './knowledge.mjs?v=20260914-6';
+import {compile,execute} from './runtime.mjs';import {examples,virtualSketch} from './examples.mjs';import {definitions,lessons,COMPANION_PARTS,COMPANION_WIRING,connected as graphConnected,checkCircuit as graphCheck,getLessonProgress,checkWire,diagnoseWrongWire,pinLabel,validateProject as oldValidate,keepWiresFromPreviousLessons,wireTouchesPart} from './circuit.mjs';import {Display} from './display.mjs';import {createTable} from './board-scene.mjs?v=20260915-2';import {initGuide} from './knowledge.mjs?v=20260915-2';
 import {analyze,defaultProgram,recipe,validateProgram,listUnits} from './blocks.mjs?v=20260912-19';
 import {executeBlocks,generateSketch} from './blocks-gen.mjs?v=20260912-19';
 import {mountBlocks} from './blocks-ui.mjs?v=20260912-19';
-import {validatePortal,loadProvision,saveProvision,clearProvision,isOnline,canListen} from './provision.mjs?v=20260914-6';
+import {validatePortal,loadProvision,saveProvision,clearProvision,isOnline,canListen} from './provision.mjs?v=20260914-9';
 import {mergeFloat32,downsample,encodeWav,wavToBase64} from './asr.mjs?v=20260914-4';
-const $=id=>document.getElementById(id),editor=$('code'),canvas=$('oled'),ctx=canvas.getContext('2d'),display=new Display();let table,wires=[],pending=null,selected=null,selectedWire=null,controller=null,runGeneration=0,ready=false,sda=5,scl=4,modes={},values={},logs=[],lastProgram='',wiringMode='custom',currentLesson=1,completedLessons=[],editorMode='blocks';
+const $=id=>document.getElementById(id),editor=$('code'),canvas=$('oled'),ctx=canvas.getContext('2d'),display=new Display();let table,wires=[],pending=null,selected=null,selectedWire=null,controller=null,runGeneration=0,ready=false,sda=5,scl=4,modes={},values={},logs=[],lastProgram='',wiringMode='custom',currentLesson=1,completedLessons=[],editorMode='blocks',lessonEditorMode='blocks';
+let lifeOpen=true,lessonLifeOpen=true,talkLifeOpen=false;
 let wireHistory=[[]],wireHistoryIndex=0;
 const PROGRESS_KEY='desk-buddy-lesson-progress';
 const HOTSPOT_KEY='desk-buddy-hotspot-id';
@@ -15,11 +16,14 @@ let connectingTimer=null;
 let keyBusy=false;
 let listenBusy=false;
 let lastHeard=null;
+let lastKeyCode='';
 let listenRec=null;
 let listenGen=0;
+let keyGen=0;
 let speakPlayer=null;
 let speakUrl=null;
 let speakFinish=null;
+let isConnected=false;
 function robotHotspotName(){
   try{
     let id=localStorage.getItem(HOTSPOT_KEY);
@@ -42,13 +46,13 @@ function paintTalkScreen(){
   else if(listenBusy==='wait') display.paintListenWait();
   else if(listenBusy==='think') display.paintThinking();
   else if(listenBusy==='speak') display.paintSpeaking();
-  else if(lastHeard&&!lastHeard.ok) display.paintListenBad();
-  else if(lastHeard&&lastHeard.ok&&lastHeard.replyOk===false) display.paintReplyBad();
-  else if(lastHeard&&lastHeard.ok&&lastHeard.speakOk===false) display.paintSpeakBad();
+  else if(lastHeard&&!lastHeard.ok) display.paintListenBad(lastHeard.code);
+  else if(lastHeard&&lastHeard.ok&&lastHeard.replyOk===false) display.paintReplyBad(lastHeard.code);
+  else if(lastHeard&&lastHeard.ok&&lastHeard.speakOk===false) display.paintSpeakBad(lastHeard.code);
   else if(lastHeard&&lastHeard.ok&&lastHeard.reply) display.paintReply(lastHeard.reply);
   else if(lastHeard&&lastHeard.ok) display.paintHeard(lastHeard.text);
   else if(isOnline(provision)&&provision.keyStatus==='ok') display.paintKeyOk();
-  else if(isOnline(provision)&&provision.keyStatus==='bad') display.paintKeyBad();
+  else if(isOnline(provision)&&provision.keyStatus==='bad') display.paintKeyBad(lastKeyCode);
   else if(isOnline(provision)) display.paintWifiOk(provision.ssid);
   else display.paintHotspot(robotHotspotName());
   display.render(ctx,true);
@@ -86,8 +90,8 @@ function updateTalkDock(){
   const listen=$('talk-listen');
   if(listen){
     if(listenBusy==='rec'){
-      listen.disabled=false;
-      listen.textContent='说完了';
+      listen.disabled=!teacherStation;
+      listen.textContent=teacherStation?'说完了':'练习听…';
     }else if(listenBusy==='wait'){
       listen.disabled=true;
       listen.textContent='正在听写…';
@@ -102,30 +106,39 @@ function updateTalkDock(){
       listen.textContent='开始听';
     }
   }
+  if($('talk-connect')){
+    $('talk-connect').hidden=!teacherStation;
+    $('talk-connect').disabled=!!isConnected||busy;
+    $('talk-connect').textContent=isConnected?'板子已连接':'连接板子';
+  }
+  if($('talk-flash')){
+    $('talk-flash').hidden=!teacherStation;
+    $('talk-flash').disabled=!isConnected||busy;
+  }
   if(portalBusy){
     if($('talk-status')) $('talk-status').textContent='正在离开热点，去连家里的网…';
     if(note) note.textContent='机器人正在用你刚填的 Wi-Fi 名字去找家里的网。这一步还不检查 MiniMax key。';
   }else if(keyBusy){
     if($('talk-status')) $('talk-status').textContent='正在检查 MiniMax 钥匙…';
-    if(note) note.textContent='老师电脑正在替机器人问 MiniMax：这把钥匙能不能用。现在还不能开始听。';
+    if(note) note.textContent=teacherStation?'老师电脑正在替机器人问 MiniMax：这把钥匙能不能用。现在还不能开始听。':'学生页正在练习检查钥匙，不会把钥匙发到网上。';
   }else if(listenBusy==='rec'){
-    if($('talk-status')) $('talk-status').textContent='正在听…请对着电脑麦克风说话';
-    if(note) note.textContent='说完再点「说完了」。听完以后它会回答，还会出声。';
+    if($('talk-status')) $('talk-status').textContent=teacherStation?'正在听…请对着电脑麦克风说话':'练习听…屏幕会假装在听';
+    if(note) note.textContent=teacherStation?'说完再点「说完了」。听完以后它会回答，还会出声。':'这是练习。屏幕会假装听、想、说。真的 MiniMax 请到老师电脑。';
   }else if(listenBusy==='wait'){
     if($('talk-status')) $('talk-status').textContent='正在把声音写成字…';
-    if(note) note.textContent='老师电脑正在把这段声音交给 MiniMax 听写。';
+    if(note) note.textContent=teacherStation?'老师电脑正在把这段声音交给 MiniMax 听写。':'这是练习听写。不会把声音发到网上。';
   }else if(listenBusy==='think'){
     if($('talk-status')) $('talk-status').textContent=lastHeard?.text?'听见了：'+lastHeard.text+' · 正在想':'正在想怎么回答…';
-    if(note) note.textContent='老师电脑正在把听见的字交给 MiniMax 想一句短回答，然后出声。';
+    if(note) note.textContent=teacherStation?'老师电脑正在把听见的字交给 MiniMax 想一句短回答，然后出声。':'这是练习。屏幕正在假装想一句回答。';
   }else if(listenBusy==='speak'){
     if($('talk-status')) $('talk-status').textContent=lastHeard?.reply?'它写下了：'+lastHeard.reply+' · 正在说':'正在说话…';
-    if(note) note.textContent='老师电脑正在把回答交给 MiniMax 出声，请听电脑喇叭。';
+    if(note) note.textContent=teacherStation?'老师电脑正在把回答交给 MiniMax 出声，请听电脑喇叭。':'这是练习出声。真的 MiniMax 声音只在老师电脑。';
   }else if(phase==='online'&&provision.keyStatus==='ok'&&lastHeard?.ok&&lastHeard.speakOk===false){
     if($('talk-status')) $('talk-status').textContent=lastHeard.reply?'它写下了：'+lastHeard.reply+' · 没有发出声音':'没有发出声音';
     if(note) note.textContent=lastHeard.message||'它写下了回答，但没有发出声音。可以再点「开始听」。';
   }else if(phase==='online'&&provision.keyStatus==='ok'&&lastHeard?.ok&&lastHeard.reply){
     if($('talk-status')) $('talk-status').textContent='它写下了：'+lastHeard.reply;
-    if(note) note.textContent=lastHeard.speakOk===false?'回答已经写在屏幕上，但没有发出声音。可以再点「开始听」。':'回答已经写在屏幕上，电脑喇叭也会说出来。可以再点「开始听」。';
+    if(note) note.textContent=lastHeard.practice?'这是练习回答。真的对话请到老师电脑上的教师台。':lastHeard.speakOk===false?'回答已经写在屏幕上，但没有发出声音。可以再点「开始听」。':'回答已经写在屏幕上，电脑喇叭也会说出来。可以再点「开始听」。';
   }else if(phase==='online'&&provision.keyStatus==='ok'&&lastHeard?.ok&&lastHeard.replyOk===false){
     if($('talk-status')) $('talk-status').textContent=lastHeard.text?'听见了：'+lastHeard.text+' · 没有想出回答':'没有想出回答';
     if(note) note.textContent=lastHeard.message||'听见了，但没有写出回答。可以再点「开始听」。';
@@ -137,13 +150,13 @@ function updateTalkDock(){
     if(note) note.textContent='刚才没写成字。可以再点「开始听」，或让大人检查钥匙。';
   }else if(phase==='online'&&provision.keyStatus==='ok'){
     if($('talk-status')) $('talk-status').textContent='已连上 '+provision.ssid+' · 钥匙能用';
-    if(note) note.textContent=teacherStation?'钥匙检查通过了。可以点「开始听」。听完它会回答，还会出声。':'钥匙检查通过了。学生页不会把声音发到网上，请到老师电脑上的教师台开始听。';
+    if(note) note.textContent=teacherStation?'钥匙检查通过了。可以点「开始听」。听完它会回答，还会出声。真机请先连接板子，再烧录对话固件。':'钥匙练习通过了。可以点「开始听」看屏幕的脸。真的 MiniMax 请到老师电脑。';
   }else if(phase==='online'&&provision.keyStatus==='bad'){
     if($('talk-status')) $('talk-status').textContent='已连上 '+provision.ssid+' · 钥匙不对';
     if(note) note.textContent='网已经连上，但 MiniMax 钥匙检查没通过。请让大人再填一次，或再点「检查钥匙」。现在还不能开始听。';
   }else if(phase==='online'){
     if($('talk-status')) $('talk-status').textContent='已连上 '+provision.ssid+' · MiniMax key 已收下';
-    if(note) note.textContent=teacherStation?'家里的网已经写进这台机器人。下一步请点「检查钥匙」。现在还不能开始听。':'家里的网已经写进这台机器人。学生页不会把钥匙发到网上，请到老师电脑上的教师台检查钥匙。现在还不能开始听。';
+    if(note) note.textContent=teacherStation?'家里的网已经写进这台机器人。下一步请点「检查钥匙」。现在还不能开始听。':'家里的网已经写进这台机器人。下一步请点「检查钥匙」。学生页只是练习，不会把钥匙发到网上。';
   }else if(phase==='joined'){
     if($('talk-status')) $('talk-status').textContent='手机已连上 '+robotHotspotName()+' · 还没填家里的网';
     if(note) note.textContent='手机已经连上机器人热点。下一步打开 192.168.4.1，填 Wi-Fi 名字、密码和 MiniMax API key。空的格子不能保存。';
@@ -188,6 +201,12 @@ function selectedPart(id){
   updateSelectionBar();
   if(id) table?.setSelectedWire(null);
 }
+function wiringFrozen(){return wiringMode!=='custom';}
+function sceneHint(){
+  return wiringFrozen()
+    ?'零件和电线已经固定 · 点空白处拖动平移 · 滚轮缩放 · 右键旋转'
+    :'点空孔接线 · 点电线可选中后删除 · 点空白处拖动平移 · 滚轮缩放 · 右键旋转';
+}
 function copyWires(list){return (list||[]).map(w=>({a:w.a,b:w.b}));}
 function sameWires(a,b){
   if(!a||!b||a.length!==b.length) return false;
@@ -195,8 +214,9 @@ function sameWires(a,b){
 }
 function updateHistoryButtons(){
   const back=$('step-back'),fwd=$('step-forward');
-  if(back) back.disabled=wireHistoryIndex<=0;
-  if(fwd) fwd.disabled=wireHistoryIndex>=wireHistory.length-1;
+  const frozen=wiringFrozen();
+  if(back) back.disabled=frozen||wireHistoryIndex<=0;
+  if(fwd) fwd.disabled=frozen||wireHistoryIndex>=wireHistory.length-1;
 }
 function commitWireHistory(){
   const snap=copyWires(wires);
@@ -216,12 +236,14 @@ function applyHistoryIndex(i){
   updateWires();
 }
 function stepBack(){
+  if(wiringFrozen()) return;
   if(wireHistoryIndex<=0) return;
   if(controller) stop('已回到上一步');
   applyHistoryIndex(wireHistoryIndex-1);
   toast('回到上一步。');
 }
 function stepForward(){
+  if(wiringFrozen()) return;
   if(wireHistoryIndex>=wireHistory.length-1) return;
   if(controller) stop('已前进到下一步');
   applyHistoryIndex(wireHistoryIndex+1);
@@ -232,6 +254,13 @@ function updateSelectionBar(){
   const remove=$('remove');
   const removeWire=$('remove-wire');
   if(!bar) return;
+  if(wiringFrozen()){
+    bar.hidden=true;
+    bar.classList.remove('wire-selected');
+    if(remove) remove.hidden=true;
+    if(removeWire) removeWire.hidden=true;
+    return;
+  }
   if(selected){
     bar.hidden=false;
     bar.classList.remove('wire-selected');
@@ -255,6 +284,7 @@ function updateSelectionBar(){
   if(removeWire) removeWire.hidden=true;
 }
 function pickWire(index){
+  if(wiringFrozen()) return;
   if(!Number.isInteger(index)){
     if(!Number.isInteger(selectedWire)) return;
     selectedWire=null;
@@ -279,6 +309,7 @@ function pickWire(index){
   updateGuide();
 }
 function deleteWireAt(i){
+  if(wiringFrozen()) return;
   if(!Number.isInteger(i)||i<0||i>=wires.length) return;
   if(controller) stop('接线已更改');
   wires.splice(i,1);
@@ -332,19 +363,19 @@ function updateGuide(){
       $('step-text').textContent='机器人正在离开自己的热点，去找你刚填的 Wi-Fi。这一步只检查有没有填名字，还不检查 MiniMax key。现在还不能开始听。';
     }else if(keyBusy){
       $('step-title').textContent='对话 · 正在检查钥匙';
-      $('step-text').textContent='老师电脑正在替机器人问 MiniMax：这把钥匙能不能用。现在还不能开始听。';
+      $('step-text').textContent=teacherStation?'老师电脑正在替机器人问 MiniMax：这把钥匙能不能用。现在还不能开始听。':'学生页正在练习检查钥匙，不会把钥匙发到网上。';
     }else if(listenBusy==='rec'){
       $('step-title').textContent='对话 · 正在听';
-      $('step-text').textContent='请对着电脑麦克风说话。说完点「说完了」。听完以后它会回答，还会出声。';
+      $('step-text').textContent=teacherStation?'请对着电脑麦克风说话。说完点「说完了」。听完以后它会回答，还会出声。':'这是练习。屏幕会假装听、想、说。真的 MiniMax 请到老师电脑。';
     }else if(listenBusy==='wait'){
       $('step-title').textContent='对话 · 正在听写';
-      $('step-text').textContent='老师电脑正在把这段声音交给 MiniMax 写成字。';
+      $('step-text').textContent=teacherStation?'老师电脑正在把这段声音交给 MiniMax 写成字。':'这是练习听写。不会把声音发到网上。';
     }else if(listenBusy==='think'){
       $('step-title').textContent='对话 · 正在想';
-      $('step-text').textContent=lastHeard?.text?'听见了：'+lastHeard.text+'。老师电脑正在让 MiniMax 想一句短回答，然后出声。':'老师电脑正在让 MiniMax 想一句短回答，然后出声。';
+      $('step-text').textContent=teacherStation?(lastHeard?.text?'听见了：'+lastHeard.text+'。老师电脑正在让 MiniMax 想一句短回答，然后出声。':'老师电脑正在让 MiniMax 想一句短回答，然后出声。'):'这是练习。屏幕正在假装想一句回答。';
     }else if(listenBusy==='speak'){
       $('step-title').textContent='对话 · 正在说';
-      $('step-text').textContent=lastHeard?.reply?'它写下了：'+lastHeard.reply+'。老师电脑正在让 MiniMax 出声，请听电脑喇叭。':'老师电脑正在让 MiniMax 出声，请听电脑喇叭。';
+      $('step-text').textContent=teacherStation?(lastHeard?.reply?'它写下了：'+lastHeard.reply+'。老师电脑正在让 MiniMax 出声，请听电脑喇叭。':'老师电脑正在让 MiniMax 出声，请听电脑喇叭。'):'这是练习出声。真的 MiniMax 声音只在老师电脑。';
     }else if(isOnline(provision)&&provision.keyStatus==='ok'&&lastHeard?.ok&&lastHeard.speakOk===false){
       $('step-title').textContent='对话 · 没有发出声音';
       $('step-text').textContent=lastHeard.message||'它写下了回答，但没有发出声音。可以再点「开始听」。';
@@ -364,7 +395,7 @@ function updateGuide(){
       $('step-title').textContent='对话 · 钥匙能用';
       $('step-text').textContent=teacherStation
         ?'已经连上 '+provision.ssid+'，MiniMax 钥匙检查通过。可以点「开始听」。听完它会回答，还会出声。'
-        :'已经连上 '+provision.ssid+'，MiniMax 钥匙检查通过。学生页不会把声音发到网上，请到老师电脑上的教师台开始听。';
+        :'已经连上 '+provision.ssid+'，钥匙练习通过了。可以点「开始听」看屏幕的脸。真的 MiniMax 请到老师电脑。';
     }else if(isOnline(provision)&&provision.keyStatus==='bad'){
       $('step-title').textContent='对话 · 钥匙不对';
       $('step-text').textContent='已经连上 '+provision.ssid+'，但 MiniMax 钥匙检查没通过。请让大人再填一次，或再点「检查钥匙」。现在还不能开始听。';
@@ -372,7 +403,7 @@ function updateGuide(){
       $('step-title').textContent='对话 · 已经连上家里的网';
       $('step-text').textContent=teacherStation
         ?'机器人已经离开自己的热点，连上了 '+provision.ssid+'。MiniMax key 已收下。下一步请点「检查钥匙」。现在还不能开始听。'
-        :'机器人已经离开自己的热点，连上了 '+provision.ssid+'。学生页不会把钥匙发到网上，请到老师电脑上的教师台检查钥匙。现在还不能开始听。';
+        :'机器人已经离开自己的热点，连上了 '+provision.ssid+'。下一步请点「检查钥匙」。学生页只是练习，不会把钥匙发到网上。';
     }else if(provision.hotspotJoined){
       $('step-title').textContent='对话 · 手机已连上热点';
       $('step-text').textContent='手机已经连上 '+ssid+'。请打开 192.168.4.1，填家里的 Wi-Fi 名字、密码和 MiniMax API key。空的格子不能保存。';
@@ -382,15 +413,15 @@ function updateGuide(){
     }
     $('steps').replaceChildren();
     $('lesson-errors').replaceChildren();
-    table.highlight([],null);
+    table.highlight([],null,[]);
   }else if(wiringMode==='ready'){
     const tag=$('guide-toggle')?.querySelector('.tag');
     if(tag) tag.textContent='接线指导';
     $('step-title').textContent='已经接好 · 完整范例';
-    $('step-text').textContent='五个零件和参考线都在。这是沙盒，可以直接运行。课程还是要自己接线才能解锁下一课。';
+    $('step-text').textContent='五个零件和参考线都在。零件和电线已经固定，可以直接运行。课程还是要自己接线才能解锁下一课。';
     $('steps').replaceChildren();
     $('lesson-errors').replaceChildren();
-    table.highlight([],pending);
+    table.highlight([],null,[]);
   }else{
     const tag=$('guide-toggle')?.querySelector('.tag');
     if(tag) tag.textContent='接线指导';
@@ -400,10 +431,13 @@ function updateGuide(){
     const bars=progress.newDone.length?progress.newDone:progress.wiresDone;
     $('steps').replaceChildren(...bars.map(v=>{const el=document.createElement('span');el.className=v?'done':'';return el;}));
     const msgs=[...progress.errors];
+    const taskIds=spec?spec.slice(0,2).map(freeHole).filter(Boolean):[];
+    let netIds=[];
     if(pending){
       const cover=coveredHoles(table.state());
-      table.highlight(holes.filter(h=>graphConnected(net,pending,h.id)&&(!cover.has(h.id)||occupied(table.state(),wires).has(h.id))).map(h=>h.id),pending);
+      netIds=holes.filter(h=>graphConnected(net,pending,h.id)&&(!cover.has(h.id)||occupied(table.state(),wires).has(h.id))).map(h=>h.id);
     }
+    table.highlight(taskIds,pending,netIds);
     if(!spec){
       const missing=lesson.parts.filter(id=>!active().includes(id));
       const newTotal=progress.newWires.length||progress.total;
@@ -411,11 +445,9 @@ function updateGuide(){
         const names=missing.map(id=>definitions.find(d=>d.id===id)?.name||id).join('、');
         $('step-title').textContent=`${newTotal} / ${newTotal} · 还差零件`;
         $('step-text').textContent=`线接上了。请从左边零件盒把 ${names} 放到桌上。`;
-        if(!pending)table.highlight([],null);
       }else{
         $('step-title').textContent=`${newTotal} / ${newTotal} · ${lesson.name}完成`;
-        $('step-text').textContent=currentLesson<lessons.length?'接线完成！点「运行」看屏幕，或开始下一课。零件挪过以后，请按新的空孔接线。':'接线完成！点「运行」看屏幕，或载入这一课的示例。';
-        if(!pending)table.highlight([],null);
+        $('step-text').textContent=currentLesson<lessons.length?'接线完成！点「运行」看屏幕，或开始下一课。':'接线完成！点「运行」看屏幕，或载入这一课的示例。';
         markCompleted(progress);
       }
     }else{
@@ -424,7 +456,6 @@ function updateGuide(){
       const prefix=prevMissing?(currentLesson>1?'上一课的线松了 · ':'') : '';
       $('step-title').textContent=`${done} / ${total} · ${prefix}${spec[2]}`;
       $('step-text').textContent=(prevMissing&&currentLesson>1?'上一课的线还要通着。 ':'')+stepHint(spec);
-      if(!pending)table.highlight(spec.slice(0,2).map(freeHole).filter(Boolean),null);
     }
     $('lesson-errors').replaceChildren();
     if(msgs.length){
@@ -444,11 +475,15 @@ function updateGuide(){
     const txt=document.createElement('span');
     const good=lesson.wires.some(lw=>checkWire(net,lw.slice(0,2))&&(graphConnected(net,w.a,lw[0])||graphConnected(net,w.a,lw[1])));
     txt.textContent=(good?'✅ ':'')+wireName(w.a)+' ↔ '+wireName(w.b);
-    const b=document.createElement('button');
-    b.textContent='删除';
-    b.onclick=e=>{e.stopPropagation();deleteWireAt(i);};
-    row.onclick=()=>pickWire(i);
-    row.append(txt,b);
+    if(!wiringFrozen()){
+      const b=document.createElement('button');
+      b.textContent='删除';
+      b.onclick=e=>{e.stopPropagation();deleteWireAt(i);};
+      row.onclick=()=>pickWire(i);
+      row.append(txt,b);
+    }else{
+      row.append(txt);
+    }
     return row;
   }));
   updateLessonUI();
@@ -458,14 +493,17 @@ function updateLessonUI(){
   const lesson=lessons[currentLesson-1];
   const talk=wiringMode==='talk';
   $('current-lesson-name').textContent=talk?'对话模式':lesson.name;
-  $('current-lesson-desc').textContent=talk?(canListen(provision)?(teacherStation?'钥匙能用。可以点「开始听」。听完它会回答，还会出声。':'钥匙能用。请到老师电脑上的教师台开始听。'):isOnline(provision)?'已经连上家里的网。下一步检查 MiniMax 钥匙。':'桌上多一颗说话按键。先连热点，再打开 192.168.4.1 填家里的网。'):lesson.description;
+  $('current-lesson-desc').textContent=talk?(canListen(provision)?(teacherStation?'钥匙能用。可以点「开始听」。听完它会回答，还会出声。':'钥匙练习通过了。可以点「开始听」看屏幕的脸。真的 MiniMax 请到老师电脑。'):isOnline(provision)?'已经连上家里的网。下一步检查 MiniMax 钥匙。':'桌上多一颗说话按键。先连热点，再打开 192.168.4.1 填家里的网。'):lesson.description;
   const count=$('parts-count');
   if(count) count.textContent=talk?'对话 6':('这一课 '+lesson.parts.length);
+  const muted=document.querySelector('.parts > p.muted');
+  if(muted) muted.textContent=wiringFrozen()?'零件已经固定，不能再加减。平移、缩放、3D 还可以。':'点一个零件，把它放上桌。后面课才用的会灰一点。';
   document.querySelectorAll('#catalog .partbtn').forEach(btn=>{
     const id=btn.dataset.part;
     const laterPart=talk?!COMPANION_PARTS.includes(id):wiringMode==='ready'?id==='btn':!lesson.parts.includes(id);
-    btn.classList.toggle('later',laterPart);
-    btn.title=laterPart?(id==='btn'?'说话按键在「对话」模式里才会用到':'这一课还用不上，先把眼前的线接完'):'点一下放到桌上';
+    btn.disabled=wiringFrozen();
+    btn.classList.toggle('later',laterPart||wiringFrozen());
+    btn.title=wiringFrozen()?'零件已经固定，不能再加减':laterPart?(id==='btn'?'说话按键在「对话」模式里才会用到':'这一课还用不上，先把眼前的线接完'):'点一下放到桌上';
   });
   for(let i=1;i<=lessons.length;i++){
     const btn=$('lesson-'+i);
@@ -492,7 +530,7 @@ function lesson1ReadyOnBoard(){
   return getLessonProgress(1,network(wires),active()).completed;
 }
 function lifeIsUnlocked(){
-  if(wiringMode==='talk') return false;
+  if(wiringMode==='talk') return true;
   return wiringMode==='ready' || lesson1ReadyOnBoard();
 }
 function updateLifeLock(){
@@ -507,25 +545,12 @@ function updateLifeLock(){
   const readyBtn=$('life-lock-ready');
   const phoneBtn=$('life-lock-phone');
   const guideBtn=$('life-lock-guide');
-  if(readyBtn) readyBtn.hidden=wiringMode==='talk';
-  if(phoneBtn){
-    phoneBtn.hidden=wiringMode!=='talk';
-    phoneBtn.disabled=talkPhase()==='hotspot'||portalBusy||keyBusy||isOnline(provision);
-    phoneBtn.textContent=provision.keyStatus==='ok'?'钥匙已检查':isOnline(provision)?'已经配上网':talkPhase()==='joined'?'用手机打开 192.168.4.1':'先连上热点';
-  }
-  if(guideBtn) guideBtn.textContent=wiringMode==='talk'?'看配网步骤':'看接线指导';
-  if(wiringMode==='talk'){
-    if(title) title.textContent='这一步还不能写积木';
-    if(copy) copy.textContent=canListen(provision)
-      ?(teacherStation?'钥匙能用。请点中间的「开始听」。听完它会回答，还会出声。积木课请切回「自己接线」或「已经接好」。':'钥匙能用。学生页不会把声音发到网上，请到老师电脑上的教师台开始听。积木课请切回「自己接线」或「已经接好」。')
-      :isOnline(provision)
-      ?(teacherStation?'已经连上家里的网。下一步请点「检查钥匙」。积木课请切回「自己接线」或「已经接好」。':'已经连上家里的网。学生页不会把钥匙发到网上，请到老师电脑上的教师台检查。积木课请切回「自己接线」或「已经接好」。')
-      :'对话模式要先用 USB 供电，再用手机连上屏幕上的热点，打开 192.168.4.1。积木课请切回「自己接线」或「已经接好」。';
-  }else{
-    if(title) title.textContent='先接线，它才会听你的话';
-    if(copy) copy.textContent='把屏幕的四根线接上。接完这边就会亮起来。也可以点「已经接好」看完整范例。';
-  }
-  if(!open&&controller) stop(wiringMode==='talk'?'对话模式不运行积木':'先接线，再运行');
+  if(readyBtn) readyBtn.hidden=false;
+  if(phoneBtn) phoneBtn.hidden=true;
+  if(guideBtn) guideBtn.textContent='看接线指导';
+  if(title) title.textContent='先接线，它才会听你的话';
+  if(copy) copy.textContent='把屏幕的四根线接上。接完这边就会亮起来。也可以点「已经接好」看完整范例。';
+  if(!open&&controller) stop('先接线，再运行');
   updateTalkDock();
 }
 function addMissingParts(lesson){
@@ -568,33 +593,32 @@ function switchLesson(lessonId,opts={}){
     :(lessonId===1?`开始${lesson.name}：${lesson.description}`:`开始${lesson.name}：上一课的线还在。${lesson.description}`));
 }
 function connect(id){
+  if(wiringFrozen()) return;
   if(!holeMap.has(id))return;
-  
-  // 修复 H6: 先做所有校验，再调用 highlight
+  if(Number.isInteger(selectedWire)){
+    selectedWire=null;
+    table?.setSelectedWire(null);
+    updateSelectionBar();
+  }
   const cover=coveredHoles(table.state());
   const pinHere=[...table.state()].flatMap(p=>footprint(p.id,p.row)).some(e=>e.b===id);
-  
   if(cover.has(id)&&!pinHere){
     toast('这个孔被零件压住了，杜邦线插不进去。请点旁边没被挡住、同一组的空孔。');
     return;
   }
-  
   if(occupied(table.state(),wires).has(id)){
     toast('此孔已被针脚或插头占用，请选同组的其他空孔。');
     return;
   }
-  
   if(controller){
     toast('先停止运行，再修改接线。');
     return;
   }
-  
-  // 校验通过后才更新高亮
-  const net=network(wires);
-  table.highlight(holes.filter(h=>graphConnected(net,id,h.id)&&(!cover.has(h.id)||occupied(table.state(),wires).has(h.id))).map(h=>h.id),id);
-  
   if(!pending){
     pending=id;
+    selectedWire=null;
+    table?.setSelectedWire(null);
+    updateSelectionBar();
     updateGuide();
     toast('已选 '+wireName(id)+'，再点击终点针脚');
     return;
@@ -642,14 +666,61 @@ function hardware(name,a){if(!counts[name]?.includes(a.length))throw Error(name+
 async function delayMs(ms,signal){if(!Number.isFinite(ms)||ms<0||ms>60000)throw Error('等待范围为 0–60 秒');for(let n=0;n<Math.max(ms,1);n+=20){if(signal.aborted)throw Error('STOPPED');await new Promise(r=>setTimeout(r,Math.min(20,Math.max(ms,1)-n)));}}
 function currentSketch(){return editorMode==='blocks'?generateSketch(blocksUI.getProgram()):editor.value;}
 function refreshBlocksCode(){if($('blocks-code'))$('blocks-code').textContent=generateSketch(blocksUI.getProgram());}
-function setEditorMode(mode,silent=false){if(mode!=='blocks'&&mode!=='code')return;if(mode===editorMode){document.querySelector('.coding')?.classList.toggle('blocks-mode',mode==='blocks');return;}if(controller)stop('已切换编辑方式');editorMode=mode;document.querySelector('.coding')?.classList.toggle('blocks-mode',mode==='blocks');$('mode-blocks')?.classList.toggle('active',mode==='blocks');$('mode-code')?.classList.toggle('active',mode==='code');if($('coding-title'))$('coding-title').textContent=mode==='blocks'?'拼积木，让它动起来':'写代码，让它动起来';if(mode==='code')numbers();if(!silent)toast(mode==='blocks'?'积木还是刚才那份。代码里改过的字不会变成积木。':'积木还留着。这里改的代码不会改回去。');}
+function codingPanel(){return document.querySelector('.coding');}
+function updateLifeToggle(){
+  const btn=$('toggle-life');
+  if(!btn) return;
+  const talk=wiringMode==='talk';
+  const label=talk||editorMode==='code'?'代码':'积木';
+  btn.textContent=label;
+  btn.classList.toggle('active',lifeOpen);
+  btn.setAttribute('aria-pressed',String(lifeOpen));
+  btn.setAttribute('aria-expanded',String(lifeOpen));
+  btn.title=lifeOpen?'收起右边栏，让实验桌更大':(talk?'打开右边的代码':'打开右边的积木和代码');
+}
+function setLifeOpen(open,silent=false){
+  lifeOpen=!!open;
+  if(wiringMode==='talk') talkLifeOpen=lifeOpen;
+  else lessonLifeOpen=lifeOpen;
+  document.body.classList.toggle('life-collapsed',!lifeOpen);
+  updateLifeToggle();
+  if(!silent) toast(lifeOpen?(wiringMode==='talk'?'右边打开了。对话模式只有代码，没有积木。':'右边打开了。'):'右边收起来了，实验桌更大。');
+}
+function applyTalkEditorChrome(){
+  const talk=wiringMode==='talk';
+  codingPanel()?.classList.toggle('talk-code-only',talk);
+  if(talk) setEditorMode('code',true);
+  else setEditorMode(lessonEditorMode,true);
+  updateLifeToggle();
+}
+function setEditorMode(mode,silent=false){
+  if(mode!=='blocks'&&mode!=='code') return;
+  if(wiringMode==='talk'&&mode==='blocks'){
+    if(!silent) toast('对话模式没有积木。请切回「自己接线」或「已经接好」。');
+    mode='code';
+  }
+  if(mode===editorMode){
+    codingPanel()?.classList.toggle('blocks-mode',mode==='blocks');
+    updateLifeToggle();
+    return;
+  }
+  if(controller) stop('已切换编辑方式');
+  editorMode=mode;
+  if(wiringMode!=='talk') lessonEditorMode=mode;
+  codingPanel()?.classList.toggle('blocks-mode',mode==='blocks');
+  $('mode-blocks')?.classList.toggle('active',mode==='blocks');
+  $('mode-code')?.classList.toggle('active',mode==='code');
+  if($('coding-title')) $('coding-title').textContent=mode==='blocks'?'拼积木，让它动起来':'写代码，让它动起来';
+  if(mode==='code') numbers();
+  updateLifeToggle();
+  if(!silent) toast(mode==='blocks'?'积木还是刚才那份。代码里改过的字不会变成积木。':'积木还留着。这里改的代码不会改回去。');
+}
 function programHasLife(program){
   return !!(listUnits(program).length||(program.stage||[]).length);
 }
-async function run(){if(!table){toast('零件尚未加载完');return;}if(wiringMode==='talk'){toast(canListen(provision)?'对话模式不运行积木。请点中间的「开始听」。':isOnline(provision)?'已经连上家里的网。请先检查 MiniMax 钥匙。对话模式不运行积木。':'对话模式先连热点、打开 192.168.4.1。现在还不能开始听，也不运行积木。');updateLifeLock();return;}if(!lifeIsUnlocked()){toast('先把屏幕的四根线接上，或点「已经接好」。');updateLifeLock();return;}stop();logs=[];$('log').textContent='';display.reset();sda=5;scl=4;modes={};values={};const generation=runGeneration;try{if(editorMode==='blocks'){const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));const program=blocksUI.getProgram();if(!programHasLife(program)){toast('还没有积木。先点左边的圆，或载入一个积木示例。');$('status').textContent='尚未运行';log('空白档案不会动。点左边角色，或载入「小球撞边」。');return;}const flags=analyze(program);lastProgram=generateSketch(program);refreshBlocksCode();await ensureAudio();if(flags.mic)await ensureMic();ready=check.ready;if(!ready&&flags.draw){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');$('status').textContent='尚未运行';log('屏幕还没接好：先把 OLED 的 GND/VCC/SCL/SDA 接上，画面才会出现。也可以点「已经接好」看完整范例。');return;}if(flags.amp&&flags.led)toast('真机上哔声会占用蓝灯那根脚。网页演示互不影响。');controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(flags.amp||flags.mic?'积木可以在网页里演示。喇叭和麦克风烧到真板子才走零件上的针脚。':'积木检查通过，正在运行。');const own=controller;await executeBlocks(program,{display,refresh(){display.render(ctx,ready);table?.refreshScreen();},delay:ms=>delayMs(ms,own.signal),playTone,stopTone,readMic,led(on){table.led(!!on);$('ledstate').textContent='板载 LED：'+(on?'点亮':'关闭');}},own.signal);return;}if(/ESP_I2S|I2SClass/.test(editor.value)){lastProgram=editor.value;await ensureAudio();if(/GAME_DINO|GAME_STAR|GAME_MOLE|PIN_MIC_|setPins\s*\(\s*21\s*,\s*20/.test(editor.value))await ensureMic();controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(/GAME_DINO|GAME_STAR|GAME_MOLE/.test(editor.value)?'这个小游戏烧到板子才走真实麦克风。网页里请对着电脑麦克风拍手或喊一声。':'这个示例是给真实板子烧录的。MAX98357 只听 I2S，网页不能驱动真实喇叭。下面用电脑喇叭/麦克风演示。');const own=controller;const demo=compile(virtualSketch(editor.value));await execute(demo,{call:hardware},own.signal);return;}const program=compile(editor.value);const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));lastProgram=editor.value;await ensureAudio();if(/analogRead\s*\(/.test(editor.value))await ensureMic();if(!check.ready){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');log('屏幕还没接好：代码会跑，但眼睛是黑的。请先把 OLED 的 GND/VCC/SCL/SDA 接上。');}controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log('语法检查通过，正在执行 setup() / loop()。');const own=controller;await execute(program,{call:hardware},own.signal);}catch(e){if(e.message==='STOPPED'||generation!==runGeneration)return;stop('运行出错');log('错误：'+e.message);const m=/第 (\d+) 行/.exec(e.message);if(m&&editorMode==='code'){let start=editor.value.split('\n').slice(0,+m[1]-1).join('\n').length;const line=editor.value.split('\n')[+m[1]-1]||'';editor.focus();editor.setSelectionRange(start,start+line.length+1);}}}
-for(const d of definitions){const b=document.createElement('button');b.className='partbtn';b.dataset.part=d.id;const sw=d.id==='btn'?document.createElement('span'):document.createElement('img');sw.className='partswatch';if(d.id!=='btn'){sw.src='./assets/guide-'+d.id+'.png';sw.alt='';sw.onerror=()=>{sw.hidden=true;}}const span=document.createElement('span'),bold=document.createElement('b'),small=document.createElement('small');bold.textContent=d.name;small.textContent={oled:'眼睛 · 把表情画出来',esp:'大脑 · 听懂你的程序',amp:'功放 · 帮声音放大',mic:'耳朵 · 听听周围的声音',speaker:'嘴巴 · 发出好听的声音',btn:'说话键 · 按下才通，不是 RST'}[d.id];span.append(bold,small);b.append(sw,span);b.onclick=()=>{if(!table)return;if(wiringMode==='talk'){if(!COMPANION_PARTS.includes(d.id)){toast('对话模式用不到这个零件。');return;}if(controller)stop('零件已更改');table.setActive(d.id,true);table.select(d.id);updateGuide();if(d.id==='btn')toast(canListen(provision)?'这是说话按键，接到 GPIO0。网页里请点「开始听」。真机上才按这颗键。':'这是说话按键，接到 GPIO0。配好网、检查钥匙以后，网页里点「开始听」。');return;}const lesson=lessons[currentLesson-1];if(d.id==='btn'){toast('说话按键在「对话」模式里才会用到。');return;}if(wiringMode!=='ready'&&!lesson.parts.includes(d.id)){toast(`这个零件在${lesson.name}里还用不上。先把这一课的线接完，下一课就会用到它。`);return;}if(controller)stop('零件已更改');table.setActive(d.id,true);table.select(d.id);updateGuide();if(d.id==='amp'||d.id==='speaker')toast('网页里声音走电脑喇叭。烧到板子才走功放和喇叭。');if(d.id==='mic')toast('网页里声音大小走电脑麦克风。烧到板子才走零件上的麦克风。');};$('catalog').append(b);}
+async function run(){if(!table){toast('零件尚未加载完');return;}if(wiringMode==='talk'){toast(canListen(provision)?'对话模式不运行右边的程序。请点中间的「开始听」。':isOnline(provision)?'已经连上家里的网。请先检查 MiniMax 钥匙。对话模式不运行右边的程序。':'对话模式先连热点、打开 192.168.4.1。现在还不能开始听，也不运行右边的程序。');updateLifeLock();return;}if(!lifeIsUnlocked()){toast('先把屏幕的四根线接上，或点「已经接好」。');updateLifeLock();return;}stop();logs=[];$('log').textContent='';display.reset();sda=5;scl=4;modes={};values={};const generation=runGeneration;try{if(editorMode==='blocks'){const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));const program=blocksUI.getProgram();if(!programHasLife(program)){toast('还没有积木。先点左边的圆，或载入一个积木示例。');$('status').textContent='尚未运行';log('空白档案不会动。点左边角色，或载入「小球撞边」。');return;}const flags=analyze(program);lastProgram=generateSketch(program);refreshBlocksCode();await ensureAudio();if(flags.mic)await ensureMic();ready=check.ready;if(!ready&&flags.draw){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');$('status').textContent='尚未运行';log('屏幕还没接好：先把 OLED 的 GND/VCC/SCL/SDA 接上，画面才会出现。也可以点「已经接好」看完整范例。');return;}if(flags.amp&&flags.led)toast('真机上哔声会占用蓝灯那根脚。网页演示互不影响。');controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(flags.amp||flags.mic?'积木可以在网页里演示。喇叭和麦克风烧到真板子才走零件上的针脚。':'积木检查通过，正在运行。');const own=controller;await executeBlocks(program,{display,refresh(){display.render(ctx,ready);table?.refreshScreen();},delay:ms=>delayMs(ms,own.signal),playTone,stopTone,readMic,led(on){table.led(!!on);$('ledstate').textContent='板载 LED：'+(on?'点亮':'关闭');}},own.signal);return;}if(/ESP_I2S|I2SClass/.test(editor.value)){lastProgram=editor.value;await ensureAudio();if(/GAME_DINO|GAME_STAR|GAME_MOLE|PIN_MIC_|setPins\s*\(\s*21\s*,\s*20/.test(editor.value))await ensureMic();controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log(/GAME_DINO|GAME_STAR|GAME_MOLE/.test(editor.value)?'这个小游戏烧到板子才走真实麦克风。网页里请对着电脑麦克风拍手或喊一声。':'这个示例是给真实板子烧录的。MAX98357 只听 I2S，网页不能驱动真实喇叭。下面用电脑喇叭/麦克风演示。');const own=controller;const demo=compile(virtualSketch(editor.value));await execute(demo,{call:hardware},own.signal);return;}const program=compile(editor.value);const check=checkCircuit(wires,active());if(check.errors.length)throw Error(check.errors.join('\n'));lastProgram=editor.value;await ensureAudio();if(/analogRead\s*\(/.test(editor.value))await ensureMic();if(!check.ready){toast('屏幕还没接好，中间是黑的。先接 OLED 四根线，或点「已经接好」看范例。');log('屏幕还没接好：代码会跑，但眼睛是黑的。请先把 OLED 的 GND/VCC/SCL/SDA 接上。');}controller=new AbortController();$('run').disabled=true;$('stop').disabled=false;$('status').textContent='运行中';log('语法检查通过，正在执行 setup() / loop()。');const own=controller;await execute(program,{call:hardware},own.signal);}catch(e){if(e.message==='STOPPED'||generation!==runGeneration)return;stop('运行出错');log('错误：'+e.message);const m=/第 (\d+) 行/.exec(e.message);if(m&&editorMode==='code'){let start=editor.value.split('\n').slice(0,+m[1]-1).join('\n').length;const line=editor.value.split('\n')[+m[1]-1]||'';editor.focus();editor.setSelectionRange(start,start+line.length+1);}}}
+for(const d of definitions){const b=document.createElement('button');b.className='partbtn';b.dataset.part=d.id;const sw=d.id==='btn'?document.createElement('span'):document.createElement('img');sw.className='partswatch';if(d.id!=='btn'){sw.src='./assets/guide-'+d.id+'.png';sw.alt='';sw.onerror=()=>{sw.hidden=true;}}const span=document.createElement('span'),bold=document.createElement('b'),small=document.createElement('small');bold.textContent=d.name;small.textContent={oled:'眼睛 · 把表情画出来',esp:'大脑 · 听懂你的程序',amp:'功放 · 帮声音放大',mic:'耳朵 · 听听周围的声音',speaker:'嘴巴 · 发出好听的声音',btn:'说话键 · 按下才通，不是 RST'}[d.id];span.append(bold,small);b.append(sw,span);b.onclick=()=>{if(!table||wiringFrozen())return;const lesson=lessons[currentLesson-1];if(d.id==='btn'){toast('说话按键在「对话」模式里才会用到。');return;}if(!lesson.parts.includes(d.id)){toast(`这个零件在${lesson.name}里还用不上。先把这一课的线接完，下一课就会用到它。`);return;}if(controller)stop('零件已更改');table.setActive(d.id,true);table.select(d.id);updateGuide();if(d.id==='amp'||d.id==='speaker')toast('网页里声音走电脑喇叭。烧到板子才走功放和喇叭。');if(d.id==='mic')toast('网页里声音大小走电脑麦克风。烧到板子才走零件上的麦克风。');};$('catalog').append(b);}
 for(let i=1;i<=lessons.length;i++){const btn=document.createElement('button');btn.id='lesson-'+i;btn.className='lesson-btn';btn.textContent=lessons[i-1].name;btn.onclick=()=>switchLesson(i);$('lesson-selector').append(btn);}
-const hint='左键拖零件或点空孔接线 · 点电线可选中后删除 · 点空白处拖动平移 · 滚轮缩放 · 右键旋转';
 const FULL_WIRING=[
   ['esp:G','rail:R-'],['esp:3.3','rail:R+'],
   ['oled:GND','rail:R-'],['oled:VCC','rail:R+'],['oled:SCL','esp:4'],['oled:SDA','esp:5'],
@@ -666,13 +737,19 @@ function setWiringMode(mode,resetParts=false,silent=false){
   $('mode-ready')?.classList.toggle('active',mode==='ready');
   $('mode-talk')?.classList.toggle('active',mode==='talk');
   document.body.classList.toggle('talk-mode',mode==='talk');
+  applyTalkEditorChrome();
+  setLifeOpen(mode==='talk'?talkLifeOpen:lessonLifeOpen,true);
   if(!table)return;
+  table.setFrozen(mode!=='custom');
+  if($('scenehint')) $('scenehint').textContent=sceneHint();
   if(controller)stop('接线模式已更改');
   if(prev==='talk'&&mode!=='talk'){
     stopListenCapture();
     stopSpeak();
     listenGen++;
+    keyGen++;
     listenBusy=false;
+    lastKeyCode='';
   }
   pending=null;
   selectedWire=null;
@@ -681,13 +758,13 @@ function setWiringMode(mode,resetParts=false,silent=false){
     table.select(null);
     applyTalkWiring();
     paintTalkScreen();
-    if(!silent)toast(canListen(provision)?(teacherStation?'对话模式：钥匙能用。可以点「开始听」。听完它会回答，还会出声。':'对话模式：钥匙能用。学生页不会把声音发到网上，请到老师电脑上的教师台开始听。'):isOnline(provision)?'对话模式：已经连上家里的网。下一步检查 MiniMax 钥匙。':'对话模式：先用 USB 供电。请先让手机连上屏幕上的热点，再打开 192.168.4.1。');
+    if(!silent)toast(canListen(provision)?(teacherStation?'对话模式：钥匙能用。可以点「开始听」。听完它会回答，还会出声。':'对话模式：钥匙练习通过了。可以点「开始听」看屏幕的脸。真的 MiniMax 请到老师电脑。'):isOnline(provision)?'对话模式：已经连上家里的网。下一步检查 MiniMax 钥匙。':'对话模式：先用 USB 供电。请先让手机连上屏幕上的热点，再打开 192.168.4.1。');
   }else if(mode==='ready'){
     table.restore(['esp','oled','amp','mic','speaker'].map(id=>placement(id)));
     table.select(null);
     applyReadyWiring();
     blackScreen();
-    if(!silent)toast(wires.length>=FULL_WIRING.length?'已经接好：五个零件都在，可以直接运行。这是沙盒，不会替你解锁下一课。':'有些孔被零件挡住，自动接线未完成，请挪一下零件再试。');
+    if(!silent)toast(wires.length>=FULL_WIRING.length?'已经接好：五个零件都在，可以直接运行。零件和电线已经固定。这是沙盒，不会替你解锁下一课。':'已经接好：有些孔被挡住，自动接线未完成。');
   }else if(resetParts||prev==='ready'||prev==='talk'){
     resetCurrentLessonBoard();
     blackScreen();
@@ -712,6 +789,8 @@ function forgetNetwork(){
   stopListenCapture();
   stopSpeak();
   listenGen++;
+  keyGen++;
+  lastKeyCode='';
   portalBusy=false;
   keyBusy=false;
   listenBusy=false;
@@ -778,24 +857,39 @@ function startConnecting(ssid,apiKey){
       updateGuide();
       updateLifeLock();
     }
-    toast(teacherStation?'已经连上 '+ssid+'。MiniMax key 已收下。下一步请点「检查钥匙」。':'已经连上 '+ssid+'。学生页不会把钥匙发到网上，请到老师电脑上的教师台检查钥匙。');
+    toast(teacherStation?'已经连上 '+ssid+'。MiniMax key 已收下。下一步请点「检查钥匙」。':'已经连上 '+ssid+'。下一步请点「检查钥匙」。学生页只是练习，不会把钥匙发到网上。');
   },1400);
 }
 async function checkMiniMaxKey(){
   if(wiringMode!=='talk'||!isOnline(provision)||portalBusy||keyBusy||listenBusy) return;
-  if(!teacherStation){
-    toast('学生页不会把钥匙发到网上。请到老师电脑上的教师台检查钥匙。');
-    return;
-  }
   if(!provision.key){
     toast('本机没有收过 MiniMax key。请重新打开 192.168.4.1 填写。');
     return;
   }
+  const gen=++keyGen;
   keyBusy=true;
+  lastHeard=null;
   paintTalkScreen();
   updateTalkDock();
   updateGuide();
   updateLifeLock();
+  if(!teacherStation){
+    toast('正在练习检查钥匙…不会把钥匙发到网上。');
+    await new Promise(r=>setTimeout(r,900));
+    if(gen!==keyGen) return;
+    provision={...provision,keyStatus:'ok'};
+    lastKeyCode='';
+    persistProvision();
+    toast('练习通过。真的 MiniMax 检查请到老师电脑上的教师台。下一步可以点「开始听」。');
+    keyBusy=false;
+    if(wiringMode==='talk'){
+      paintTalkScreen();
+      updateTalkDock();
+      updateGuide();
+      updateLifeLock();
+    }
+    return;
+  }
   toast('正在检查 MiniMax 钥匙…');
   try{
     const res=await fetch('/api/minimax/health',{
@@ -805,15 +899,20 @@ async function checkMiniMaxKey(){
     });
     let data={};
     try{data=await res.json();}catch{data={};}
+    if(gen!==keyGen) return;
     const ok=!!data.ok;
+    lastKeyCode=ok?'':(data.code||'bad');
     provision={...provision,keyStatus:ok?'ok':'bad'};
     persistProvision();
     toast(data.message||(ok?'钥匙能用。下一步可以点「开始听」。':'钥匙检查没有通过。'));
   }catch{
+    if(gen!==keyGen) return;
+    lastKeyCode='network';
     provision={...provision,keyStatus:'bad'};
     persistProvision();
     toast('老师电脑连不上检查服务。请确认教师烧录台还开着。');
   }finally{
+    if(gen!==keyGen) return;
     keyBusy=false;
     if(wiringMode==='talk'){
       paintTalkScreen();
@@ -901,7 +1000,7 @@ async function startListen(){
     return;
   }
   if(!teacherStation){
-    toast('学生页不会把声音发到网上。请到老师电脑上的教师台开始听。');
+    playStudentTalk();
     return;
   }
   stopSpeak();
@@ -932,7 +1031,7 @@ async function startListen(){
     listenRec={stream,source,processor,mute,chunks,rate:ctx.sampleRate,started:Date.now(),timer:setTimeout(()=>finishListen(),8000)};
   }catch{
     listenBusy=false;
-    lastHeard={ok:false,text:'',message:'没有麦克风权限。请允许老师电脑使用麦克风后再试。'};
+    lastHeard={ok:false,text:'',message:'没有麦克风权限。请允许老师电脑使用麦克风后再试。',code:'format'};
     paintTalkScreen();
     updateTalkDock();
     updateGuide();
@@ -940,15 +1039,65 @@ async function startListen(){
     toast(lastHeard.message);
   }
 }
+function waitTalk(ms,gen){
+  return new Promise(r=>setTimeout(()=>r(gen===listenGen),ms));
+}
+async function playStudentTalk(){
+  const gen=++listenGen;
+  stopSpeak();
+  lastHeard=null;
+  listenBusy='rec';
+  paintTalkScreen();
+  updateTalkDock();
+  updateGuide();
+  updateLifeLock();
+  toast('这是练习。屏幕会假装听、想、说。真的 MiniMax 请到老师电脑。');
+  if(!await waitTalk(1400,gen)) return;
+  lastHeard={ok:true,text:'你好呀',practice:true};
+  listenBusy='wait';
+  paintTalkScreen();
+  updateTalkDock();
+  updateGuide();
+  updateLifeLock();
+  if(!await waitTalk(800,gen)) return;
+  listenBusy='think';
+  paintTalkScreen();
+  updateTalkDock();
+  updateGuide();
+  updateLifeLock();
+  if(!await waitTalk(900,gen)) return;
+  lastHeard={ok:true,text:'你好呀',reply:'你好，我在听。',replyOk:true,practice:true};
+  listenBusy='speak';
+  paintTalkScreen();
+  updateTalkDock();
+  updateGuide();
+  updateLifeLock();
+  toast('练习出声。真的 MiniMax 声音只在老师电脑。');
+  try{
+    await ensureAudio();
+    playTone(620);
+    await waitTalk(900,gen);
+    stopTone();
+  }catch{}
+  if(gen!==listenGen) return;
+  lastHeard={...lastHeard,speakOk:true};
+  listenBusy=false;
+  paintTalkScreen();
+  updateTalkDock();
+  updateGuide();
+  updateLifeLock();
+  toast('练习说完了：你好，我在听。真的对话请到老师电脑。');
+}
 function finishListen(){
   if(listenBusy!=='rec') return;
+  if(!teacherStation) return;
   const rec=listenRec;
   stopListenCapture();
   const elapsed=rec?Date.now()-rec.started:0;
   const merged=mergeFloat32(rec?.chunks||[]);
   if(elapsed<300||merged.length<800){
     listenBusy=false;
-    lastHeard={ok:false,text:'',message:'说得太短了。请再靠近麦克风说一次。'};
+    lastHeard={ok:false,text:'',message:'说得太短了。请再靠近麦克风说一次。',code:'empty'};
     paintTalkScreen();
     updateTalkDock();
     updateGuide();
@@ -977,7 +1126,7 @@ async function sendAsr(audio){
     let data={};
     try{data=await res.json();}catch{data={};}
     if(gen!==listenGen) return;
-    lastHeard={ok:!!data.ok,text:typeof data.text==='string'?data.text:'',message:data.message||''};
+    lastHeard={ok:!!data.ok,text:typeof data.text==='string'?data.text:'',message:data.message||'',code:data.code||''};
     if(!data.ok||!lastHeard.text){
       toast(data.message||(data.ok?'没听清。请再靠近麦克风说一次。':'听写没有成功。请再试一次。'));
       listenBusy=false;
@@ -993,7 +1142,7 @@ async function sendAsr(audio){
     await sendChat(lastHeard.text,gen);
   }catch{
     if(gen!==listenGen) return;
-    lastHeard={ok:false,text:'',message:'老师电脑连不上听写服务。请确认教师烧录台还开着。'};
+    lastHeard={ok:false,text:'',message:'老师电脑连不上听写服务。请确认教师烧录台还开着。',code:'network'};
     toast(lastHeard.message);
     listenBusy=false;
     if(wiringMode==='talk'){
@@ -1028,6 +1177,7 @@ async function sendChat(text,gen){
       reply:typeof data.reply==='string'?data.reply:'',
       replyOk:!!data.ok,
       message:data.message||'',
+      code:data.ok?'ok':(data.code||'bad'),
     };
     if(!data.ok||!lastHeard.reply){
       toast(data.message||(data.ok?'它想了一下，但没写出字。':'它没有想出回答。请再试一次。'));
@@ -1044,7 +1194,7 @@ async function sendChat(text,gen){
     await sendTts(lastHeard.reply,gen);
   }catch{
     if(gen!==listenGen) return;
-    lastHeard={...(lastHeard||{ok:true,text}),ok:true,text,reply:'',replyOk:false,message:'老师电脑连不上回答服务。请确认教师烧录台还开着。'};
+    lastHeard={...(lastHeard||{ok:true,text}),ok:true,text,reply:'',replyOk:false,message:'老师电脑连不上回答服务。请确认教师烧录台还开着。',code:'network'};
     toast(lastHeard.message);
     listenBusy=false;
     if(wiringMode==='talk'){
@@ -1079,6 +1229,7 @@ async function sendTts(reply,gen){
       replyOk:true,
       speakOk:!!data.ok,
       message:data.message||'',
+      code:data.ok?'ok':(data.code||'bad'),
     };
     if(!data.ok||!data.audio){
       toast(data.message||'它写下了回答，但没有发出声音。请再试一次。');
@@ -1087,14 +1238,14 @@ async function sendTts(reply,gen){
     const played=await playMp3Base64(data.audio);
     if(gen!==listenGen) return;
     if(!played){
-      lastHeard={...lastHeard,speakOk:false,message:'电脑喇叭没有播出声音。请检查音量后再试。'};
+      lastHeard={...lastHeard,speakOk:false,message:'电脑喇叭没有播出声音。请检查音量后再试。',code:'bad'};
       toast(lastHeard.message);
       return;
     }
     toast(lastHeard.reply?'它说了：'+lastHeard.reply:'它说完了。');
   }catch{
     if(gen!==listenGen) return;
-    lastHeard={...(lastHeard||{ok:true,reply}),ok:true,reply,replyOk:true,speakOk:false,message:'老师电脑连不上出声服务。请确认教师烧录台还开着。'};
+    lastHeard={...(lastHeard||{ok:true,reply}),ok:true,reply,replyOk:true,speakOk:false,message:'老师电脑连不上出声服务。请确认教师烧录台还开着。',code:'network'};
     toast(lastHeard.message);
   }finally{
     if(gen!==listenGen) return;
@@ -1132,15 +1283,19 @@ $('life-lock-guide')?.addEventListener('click',()=>{
 $('life-lock-ready')?.addEventListener('click',()=>setWiringMode('ready'));
 $('life-lock-phone')?.addEventListener('click',openPhone);
 updateLifeLock();
+updateLifeToggle();
+$('toggle-life')?.addEventListener('click',()=>setLifeOpen(!lifeOpen));
 $('mode-blocks').onclick=()=>setEditorMode('blocks');
 $('mode-code').onclick=()=>setEditorMode('code');
 $('load-block-example').onclick=()=>{const opt=$('block-example').selectedOptions[0];if(opt?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完。');return;}if(!confirm('载入积木示例会替换当前积木，是否继续？'))return;stop('积木示例已载入');blocksUI.setProgram(recipe($('block-example').value));refreshBlocksCode();};
-$('run').onclick=run;$('stop').onclick=()=>stop();$('clearlog').onclick=()=>{logs=[];$('log').textContent='';};$('help').onclick=()=>$('helpdialog').showModal();$('top').onclick=()=>{table?.setMode('top');$('top').classList.add('active');$('three').classList.remove('active');$('scenehint').textContent=hint;};$('xray').onclick=()=>{const on=$('xray').getAttribute('aria-pressed')!=='true';$('xray').setAttribute('aria-pressed',String(on));table?.setXray(on);$('xray').classList.toggle('active',on);};$('three').onclick=()=>{table?.setMode('three');$('three').classList.add('active');$('top').classList.remove('active');$('scenehint').textContent=hint;};$('resetview').onclick=()=>{table?.center();showZoom();};$('zoom-in').onclick=()=>table?.zoomBy(1.2);$('zoom-out').onclick=()=>table?.zoomBy(1/1.2);$('zoom-reset').onclick=()=>table?.zoomTo(1);$('mode-custom').onclick=()=>setWiringMode('custom');$('mode-ready').onclick=()=>setWiringMode('ready');$('mode-talk')?.addEventListener('click',()=>setWiringMode('talk'));
+$('run').onclick=run;$('stop').onclick=()=>stop();$('clearlog').onclick=()=>{logs=[];$('log').textContent='';};$('help').onclick=()=>$('helpdialog').showModal();$('top').onclick=()=>{table?.setMode('top');$('top').classList.add('active');$('three').classList.remove('active');$('scenehint').textContent=sceneHint();};$('xray').onclick=()=>{const on=$('xray').getAttribute('aria-pressed')!=='true';$('xray').setAttribute('aria-pressed',String(on));table?.setXray(on);$('xray').classList.toggle('active',on);};$('three').onclick=()=>{table?.setMode('three');$('three').classList.add('active');$('top').classList.remove('active');$('scenehint').textContent=sceneHint();};$('resetview').onclick=()=>{table?.center();showZoom();};$('zoom-in').onclick=()=>table?.zoomBy(1.2);$('zoom-out').onclick=()=>table?.zoomBy(1/1.2);$('zoom-reset').onclick=()=>table?.zoomTo(1);$('mode-custom').onclick=()=>setWiringMode('custom');$('mode-ready').onclick=()=>setWiringMode('ready');$('mode-talk')?.addEventListener('click',()=>setWiringMode('talk'));
 $('talk-join')?.addEventListener('click',joinHotspot);
 $('talk-open')?.addEventListener('click',openPhone);
 $('talk-check')?.addEventListener('click',checkMiniMaxKey);
 $('talk-forget')?.addEventListener('click',forgetNetwork);
-$('talk-listen')?.addEventListener('click',onTalkListen);$('remove').onclick=()=>{if(!selected)return;const id=selected;stop('零件已收回');const board=table.state();wires=wires.filter(w=>!wireTouchesPart(w,id,board));table.setActive(id,false);pending=null;selectedWire=null;table.select(null);commitWireHistory();updateWires();};$('remove-wire').onclick=()=>{if(!Number.isInteger(selectedWire))return;deleteWireAt(selectedWire);toast('这根线已拿掉。');};$('step-back').onclick=stepBack;$('step-forward').onclick=stepForward;
+$('talk-listen')?.addEventListener('click',onTalkListen);
+$('talk-connect')?.addEventListener('click',()=>$('connect-board')?.click());
+$('talk-flash')?.addEventListener('click',flashTalkFirmware);$('remove').onclick=()=>{if(wiringFrozen()||!selected)return;const id=selected;stop('零件已收回');const board=table.state();wires=wires.filter(w=>!wireTouchesPart(w,id,board));table.setActive(id,false);pending=null;selectedWire=null;table.select(null);commitWireHistory();updateWires();};$('remove-wire').onclick=()=>{if(wiringFrozen()||!Number.isInteger(selectedWire))return;deleteWireAt(selectedWire);toast('这根线已拿掉。');};$('step-back').onclick=stepBack;$('step-forward').onclick=stepForward;
 function lesson(){stop();table.center();switchLesson(currentLesson,{restart:true});}
 $('lesson').onclick=()=>{const name=lessons[currentLesson-1].name;const msg=currentLesson===1?`重新开始${name}？零件和接线会重置，代码会保留。`:`重新开始${name}？这一课新接的线会清掉，上一课的线还在。代码会保留。`;if(confirm(msg))lesson();};$('loadexample').onclick=()=>{const opt=$('example').selectedOptions[0];if(opt?.disabled){toast('这个示例要下一课的零件。先把这一课的线接完，或点「已经接好」再载入。');return;}if(editor.value!==lastProgram&&editor.value!==examples.eyes&&!confirm('载入示例会替换编辑器中的代码，是否继续？'))return;stop('示例已载入');editor.value=examples[$('example').value];lastProgram=editor.value;numbers();};
 editor.addEventListener('input',()=>{numbers();if(controller)stop('代码已修改，请重新运行');});editor.addEventListener('scroll',()=>{$('numbers').scrollTop=editor.scrollTop;});editor.addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();const start=editor.selectionStart,end=editor.selectionEnd;editor.setRangeText('  ',start,end,'end');editor.dispatchEvent(new Event('input'));}if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();run();}});
@@ -1150,13 +1305,14 @@ function exportCode(){const sketch=currentSketch();download('desk-buddy.ino',ske
 function showHandoff(){$('handoff-code').value=currentSketch();$('handoffdialog').showModal();}
 async function copyCode(){const code=currentSketch();try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(code);}else{const field=$('handoff-code');field.focus();field.select();if(!document.execCommand('copy'))throw Error('复制不可用');}toast('代码已复制！现在把它粘贴发给老师。');}catch{toast('复制没有成功，试试点击“下载 .ino”。');}}
 $('handoff').onclick=showHandoff;$('copy-code').onclick=copyCode;
-$('save').onclick=()=>{if(!table)return;download('desk-buddy.json',JSON.stringify(project(),null,2),'application/json');toast('作品已保存到下载文件夹');};$('export').onclick=()=>download('desk_buddy.ino',editor.value,'text/plain');$('open').onclick=()=>$('file').click();$('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{if(file.size>200000)throw Error('文件太大');const data=await file.text();if(!confirm('打开文件会替换当前作品中的相应内容，是否继续？'))return;if(file.name.endsWith('.ino')){stop('代码已打开');editor.value=data;setEditorMode('code',true);}else{const p=validateProject(JSON.parse(data));stop('作品已打开');editor.value=p.code;table.restore(p.parts);wires=p.wires.map(w=>({a:w.a,b:w.b}));pending=null;selectedWire=null;commitWireHistory();updateWires();blocksUI.setProgram(p.version===3&&p.blocks?validateProgram(p.blocks):defaultProgram());refreshBlocksCode();setEditorMode(p.version===3?(p.editorMode==='code'?'code':'blocks'):'code',true);}numbers();lastProgram=editorMode==='blocks'?generateSketch(blocksUI.getProgram()):editor.value;}catch(e){toast('打开失败：'+e.message);}$('file').value='';};
+$('save').onclick=()=>{if(!table)return;download('desk-buddy.json',JSON.stringify(project(),null,2),'application/json');toast('作品已保存到下载文件夹');};$('export').onclick=()=>download('desk_buddy.ino',editor.value,'text/plain');$('open').onclick=()=>$('file').click();$('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{if(file.size>200000)throw Error('文件太大');const data=await file.text();if(!confirm('打开文件会替换当前作品中的相应内容，是否继续？'))return;if(file.name.endsWith('.ino')){stop('代码已打开');editor.value=data;lessonEditorMode='code';setEditorMode('code',true);}else{const p=validateProject(JSON.parse(data));stop('作品已打开');editor.value=p.code;table.restore(p.parts);wires=p.wires.map(w=>({a:w.a,b:w.b}));pending=null;selectedWire=null;commitWireHistory();updateWires();blocksUI.setProgram(p.version===3&&p.blocks?validateProgram(p.blocks):defaultProgram());refreshBlocksCode();const next=p.version===3?(p.editorMode==='code'?'code':'blocks'):'code';lessonEditorMode=next;setEditorMode(next,true);}numbers();lastProgram=editorMode==='blocks'?generateSketch(blocksUI.getProgram()):editor.value;}catch(e){toast('打开失败：'+e.message);}$('file').value='';};
 $('export').onclick=exportCode;
 try{table=await createTable($('viewport'),canvas,{pin:connect,select:selectedPart,pickWire,change:()=>{stop('孔位已更改，请重新运行');pending=null;selectedWire=null;if(wiringMode==='ready')applyReadyWiring();if(wiringMode==='talk'){applyTalkWiring();paintTalkScreen();}commitWireHistory();updateWires();},message:toast,zoom:showZoom});table.center();showZoom(1);switchLesson(1);if(completedLessons.length)toast('课程还记得：已完成的课仍然解锁。桌上的线要重新接，也可以打开上次保存的作品。');$('loading').remove();}catch(e){$('loading').textContent='三维零件加载失败，请刷新页面。'+e.message;log(e.message);$('run').disabled=true;}
 window.addEventListener('keydown',e=>{
   const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)||e.target.isContentEditable;
-  if(e.key==='Escape'){pending=null;pickWire(null);updateGuide();return;}
+  if(e.key==='Escape'){if(wiringFrozen()) return;pending=null;pickWire(null);updateGuide();return;}
   if(typing) return;
+  if(wiringFrozen()) return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey) stepForward(); else stepBack();return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();stepForward();return;}
   if((e.key==='Delete'||e.key==='Backspace')&&Number.isInteger(selectedWire)){e.preventDefault();deleteWireAt(selectedWire);toast('这根线已拿掉。');}
@@ -1168,7 +1324,6 @@ if(document.modelContext?.registerTool){const life=new AbortController();window.
 let espPort = null;
 let espTransport = null;
 let espLoader = null;
-let isConnected = false;
 
 async function loadESPTools() {
   if (window.Transport) return;
@@ -1245,6 +1400,7 @@ $('connect-board').onclick = async () => {
     $('connect-board').style.display = 'none';  // 修复 H10: 隐藏连接按钮
     $('disconnect-board').style.display = '';    // 显示断开按钮
     $('flash').disabled = false;
+    if(wiringMode==='talk') updateTalkDock();
     toast(`✅ 已连接: ${chipName}`);
 
   } catch (err) {
@@ -1287,31 +1443,27 @@ $('disconnect-board').onclick = async () => {
   $('disconnect-board').style.display = 'none';
   $('connect-board').disabled = false;
   $('flash').disabled = true;
+  if(wiringMode==='talk') updateTalkDock();
   toast('已断开连接');
 };
 
-// 烧录程序
-$('flash').onclick = async () => {
+async function flashSketch(code, doneToast) {
   if (!teacherStation) { toast('烧录只在老师电脑上的教师烧录台进行。'); return; }
   if (!isConnected) {
     toast('请先连接板子');
     return;
   }
-
   try {
     $('flash').disabled = true;
+    $('talk-flash') && ($('talk-flash').disabled = true);
     $('connect-board').disabled = true;
-    
-    // 1. 编译代码
     toast('正在编译程序...');
     $('status').textContent = '编译中...';
-    
     const compileRes = await fetch('/api/compile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: currentSketch() })
+      body: JSON.stringify({ code })
     });
-
     let compiled;
     try {
       compiled = await compileRes.json();
@@ -1323,23 +1475,17 @@ $('flash').onclick = async () => {
     }
     const { files, compileTime } = compiled;
     toast(`✓ 编译完成（${(compileTime/1000).toFixed(1)}s），开始烧录...`);
-
-    // 2. 重新进入 bootloader 模式（修复 C1：确保芯片在下载模式）
     $('status').textContent = '准备烧录...';
     try {
       await espLoader.connect('default_reset');
       console.log('[烧录] 重新同步 bootloader');
     } catch (e) {
       console.warn('[烧录] 同步警告:', e.message);
-      // 如果已经在 bootloader 模式则继续
     }
-
-    // 3. 烧录固件
     const fileArray = files.map(f => ({
       data: Uint8Array.from(atob(f.data), c => c.charCodeAt(0)),
       address: f.offset
     }));
-
     await espLoader.writeFlash({
       fileArray,
       flashSize: '4MB',
@@ -1347,24 +1493,21 @@ $('flash').onclick = async () => {
       flashFreq: '80m',
       eraseAll: false,
       compress: true,
-      reportProgress: (fileIndex, written, total) => {  // 修复 H1：正确的参数签名
+      reportProgress: (fileIndex, written, total) => {
         const percent = total > 0 ? Math.round((written / total) * 100) : 0;
         $('status').textContent = `烧录中 ${percent}%`;
       }
     });
-
     $('status').textContent = '烧录成功！';
-    toast('✅ 烧录成功！板子正在运行程序');
-    
+    toast(doneToast || '✅ 烧录成功！板子正在运行程序');
     try {
       await espLoader.hardReset();
     } catch (e) {
       toast('⚠️ 自动复位失败，请手动按 RST 按钮');
     }
-
   } catch (err) {
     console.error(err);
-    const friendlyMsg = err.message.includes('Serial data stream stopped') 
+    const friendlyMsg = err.message.includes('Serial data stream stopped')
       ? '板子无响应，请重新插拔 USB 并重新连接'
       : err.message;
     toast('❌ 烧录失败: ' + friendlyMsg);
@@ -1372,5 +1515,26 @@ $('flash').onclick = async () => {
   } finally {
     $('flash').disabled = !isConnected;
     $('connect-board').disabled = false;
+    if (wiringMode === 'talk') updateTalkDock();
   }
+}
+async function flashTalkFirmware() {
+  if (wiringMode !== 'talk') return;
+  if (!teacherStation) { toast('烧录只在老师电脑上的教师烧录台进行。'); return; }
+  toast('正在读取对话固件…');
+  const res = await fetch('./firmware/desk-buddy-talk.ino');
+  if (!res.ok) { toast('找不到对话固件文件。请确认教师烧录台还开着。'); return; }
+  const code = await res.text();
+  if (!code.includes('192.168.4.1') || !code.includes('speech_to_text')) {
+    toast('对话固件文件不完整。');
+    return;
+  }
+  await flashSketch(code, '✅ 对话固件已烧录。拔掉再插 USB，屏幕应出现热点名。手机连上后打开 192.168.4.1。短按说话键听，长按 4 秒忘记网络。');
+}
+$('flash').onclick = async () => {
+  if (wiringMode === 'talk') {
+    await flashTalkFirmware();
+    return;
+  }
+  await flashSketch(currentSketch(), '✅ 烧录成功！板子正在运行程序');
 };
